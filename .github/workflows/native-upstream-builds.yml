@@ -1,6 +1,11 @@
 name: Native upstream compile matrix (P0)
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/benchmark-upstreams.sh'
+      - '.github/workflows/native-upstream-builds.yml'
   pull_request:
     paths:
       - 'scripts/benchmark-upstreams.sh'
