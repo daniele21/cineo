@@ -101,19 +101,19 @@ Each issue has a vertical deliverable; codes can be used as issue titles and acc
 
 | ID | Title | Priority | Estimate | Dependencies |
 | --- | --- | --- | --- | --- |
-| CINEO-001 | Audit native upstream builds, module maturity and licensing | P0 | L | — |
-| CINEO-002 | Adapt starter engineering baseline to Cineo | P0 | M | — |
-| CINEO-003 | Create native Cineo capture-to-file vertical slice | P1 | L | 001, 002 |
-| CINEO-004 | Time-synchronized cursor/click sidecar | P1/P2 | M | 003 |
-| CINEO-005 | Versioned, crash-safe project and undoable edit model | P2 | L | 003 |
-| CINEO-006 | Shared scene geometry and preview/export parity | P2 | XL | 005 |
-| CINEO-007 | Smart Camera zoom rules + independent cursor effects | P3 | L | 004, 006 |
-| CINEO-008 | Auto Edit and progressive Studio UX | P3 | M | 005, 007 |
-| CINEO-009 | Local portrait/landscape export and safe reframing | P3 | L | 006, 008 |
-| CINEO-010 | Native E2E, golden frames and benchmark fixture corpus | P0–P3 | L | 001 then continuous |
-| CINEO-011 | Manual keyframes, spotlight, callouts and editing polish | P4 | XL | 009 |
-| CINEO-012 | Semantic Director and repeatable demo automation | P5 | XL | 010, 011 |
-| CINEO-013 | Native signing, notarization and release readiness | P6 | L | 009, 010 |
+| [CINEO-001](https://github.com/daniele21/cineo/issues/1) | Audit native upstream builds, module maturity and licensing | P0 | L | — |
+| [CINEO-002](https://github.com/daniele21/cineo/issues/2) | Adapt starter engineering baseline to Cineo | P0 | M | — |
+| [CINEO-003](https://github.com/daniele21/cineo/issues/3) | Create native Cineo capture-to-file vertical slice | P1 | L | 001, 002 |
+| [CINEO-004](https://github.com/daniele21/cineo/issues/4) | Time-synchronized cursor/click sidecar | P1/P2 | M | 003 |
+| [CINEO-005](https://github.com/daniele21/cineo/issues/5) | Versioned, crash-safe project and undoable edit model | P2 | L | 003 |
+| [CINEO-006](https://github.com/daniele21/cineo/issues/6) | Shared scene geometry and preview/export parity | P2 | XL | 005 |
+| [CINEO-007](https://github.com/daniele21/cineo/issues/7) | Smart Camera zoom rules + independent cursor effects | P3 | L | 004, 006 |
+| [CINEO-008](https://github.com/daniele21/cineo/issues/8) | Auto Edit and progressive Studio UX | P3 | M | 005, 007 |
+| [CINEO-009](https://github.com/daniele21/cineo/issues/9) | Local portrait/landscape export and safe reframing | P3 | L | 006, 008 |
+| [CINEO-010](https://github.com/daniele21/cineo/issues/10) | Native E2E, golden frames and benchmark fixture corpus | P0–P3 | L | 001 then continuous |
+| [CINEO-011](https://github.com/daniele21/cineo/issues/11) | Manual keyframes, spotlight, callouts and editing polish | P4 | XL | 009 |
+| [CINEO-012](https://github.com/daniele21/cineo/issues/12) | Semantic Director and repeatable demo automation | P5 | XL | 010, 011 |
+| [CINEO-013](https://github.com/daniele21/cineo/issues/13) | Native signing, notarization and release readiness | P6 | L | 009, 010 |
 
 ## Workstreams and safe parallelism
 
