@@ -44,6 +44,7 @@ run_one() {
   git -C "$dir" fetch --depth 1 origin "$sha"
   git -C "$dir" checkout --detach "$sha"
   echo "Source pinned: $(git -C "$dir" rev-parse HEAD)"
+  echo "Toolchain: $(xcodebuild -version | tr '\\n' ' ')"
   if [[ "$name" == cinescreen ]]; then
     command -v xcodegen >/dev/null || { echo "XcodeGen required; not installing automatically." >&2; return 4; }
     (cd "$dir" && make project)
@@ -52,6 +53,8 @@ run_one() {
   if [[ "$name" == "orbit" ]]; then proj="$dir/Reco.xcodeproj"; fi
   if [[ "$name" == "cinescreen" ]]; then proj="$dir/CineScreen.xcodeproj"; fi
   mkdir -p "$ROOT/logs"
+  echo "Detected Xcode schemes:"
+  xcodebuild -list -project "$proj" | tail -n 30
   echo "Compiling $name without signing; this does not prove capture/permissions."
   (
     set -o pipefail
