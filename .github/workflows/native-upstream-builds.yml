@@ -1,0 +1,57 @@
+name: Native upstream compile matrix (P0)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/benchmark-upstreams.sh'
+      - '.github/workflows/native-upstream-builds.yml'
+  pull_request:
+    paths:
+      - 'scripts/benchmark-upstreams.sh'
+      - '.github/workflows/native-upstream-builds.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-upstream-build:
+    name: P0 native build / ${{ matrix.candidate }}
+    runs-on: macos-26
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        candidate: [orbit, cinescreen, bettercapture]
+    env:
+      CINEO_BENCH_ROOT: ${{ runner.temp }}/cineo-upstream-bench
+    steps:
+      - name: Checkout Cineo harness
+        uses: actions/checkout@v4
+
+      - name: Record macOS/Xcode versions
+        run: |
+          uname -a
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen for CineScreen
+        if: matrix.candidate == 'cinescreen'
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+
+      - name: Build selected pinned native upstream
+        shell: bash
+        run: bash scripts/benchmark-upstreams.sh --run "${{ matrix.candidate }}"
+
+      - name: Upload build logs when available
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-${{ matrix.candidate }}-build-logs
+          path: ${{ env.CINEO_BENCH_ROOT }}/logs
+          if-no-files-found: ignore
+          retention-days: 7
