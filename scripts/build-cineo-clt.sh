@@ -5,18 +5,15 @@ set -euo pipefail
 # Explicitly does not invoke xcodebuild or require Xcode.app.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE="$ROOT/Apps/Cineo"
-# Keep the local app at one durable path as well as one signing identity.
-# CI and worktrees may override this without affecting normal local use.
-BUILD_ROOT="${CINEO_CLT_BUILD_ROOT:-$HOME/Library/Application Support/Cineo/Builds}"
-# Isolated real-Mac regression build for the stop/finalization candidate.
-# Keep regular Cineo's bundle identity and TCC settings untouched.
-if [[ "${CINEO_CLT_ISOLATED_CAPTURE:-0}" == "1" ]]; then
-  APP="$BUILD_ROOT/Cineo Stop Fix.app"
-  STAGE="$BUILD_ROOT/Cineo Stop Fix.stage.app"
-else
-  APP="$BUILD_ROOT/Cineo.app"
-  STAGE="$BUILD_ROOT/Cineo.stage.app"
-fi
+# One canonical, LaunchServices-discoverable developer app on the Mac.
+# Do not reuse the older com.daniele21.cineo.capturealpha / .stopfix
+# identities: macOS may select another registered copy on permission restart.
+# CI may override the build root, but interactive launches must always use
+# this default location.
+BUILD_ROOT="${CINEO_CLT_BUILD_ROOT:-$HOME/Applications}"
+APP="$BUILD_ROOT/Cineo Dev.app"
+STAGE="$BUILD_ROOT/Cineo Dev.stage.app"
+APP_BUNDLE_ID="com.daniele21.cineo.capturealpha.dev"
 
 [[ "$(uname -s)" == Darwin ]] || { echo "Cineo native app requires macOS" >&2; exit 2; }
 for executable in swift xcrun xcode-select plutil codesign; do
@@ -78,10 +75,10 @@ cat > "$STAGE/Contents/Info.plist" <<'EOF'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>com.daniele21.cineo.capturealpha</string>
+  <key>CFBundleIdentifier</key><string>com.daniele21.cineo.capturealpha.dev</string>
   <key>CFBundleExecutable</key><string>Cineo</string>
-  <key>CFBundleName</key><string>Cineo</string>
-  <key>CFBundleDisplayName</key><string>Cineo Capture Alpha</string>
+  <key>CFBundleName</key><string>Cineo Dev</string>
+  <key>CFBundleDisplayName</key><string>Cineo Dev</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>1</string>
@@ -100,14 +97,11 @@ SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --short=12 HEAD)"
 }
 plutil -insert CineoSourceCommit -string "$SOURCE_COMMIT" "$STAGE/Contents/Info.plist"
 plutil -insert CineoCaptureImplementation -string "stream-stop-v2" "$STAGE/Contents/Info.plist"
-if [[ "${CINEO_CLT_ISOLATED_CAPTURE:-0}" == "1" ]]; then
-  # Separate app identity ensures LaunchServices and the macOS permission UI
-  # cannot silently conflate this candidate with the old Cineo build.
-  plutil -replace CFBundleIdentifier -string "com.daniele21.cineo.capturealpha.stopfix" "$STAGE/Contents/Info.plist"
-  plutil -replace CFBundleName -string "Cineo Stop Fix" "$STAGE/Contents/Info.plist"
-  plutil -replace CFBundleDisplayName -string "Cineo Stop Fix" "$STAGE/Contents/Info.plist"
-fi
 plutil -lint "$STAGE/Contents/Info.plist"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$STAGE/Contents/Info.plist")" == "$APP_BUNDLE_ID" ]] || {
+  echo "Refusing to sign a Cineo build with an unexpected bundle identity." >&2
+  exit 3
+}
 
 # Persistent local signing avoids build-specific designated requirements.
 # A Developer ID certificate and notarization remain release-only concerns.
@@ -129,7 +123,19 @@ if [[ "$SIGNING_MODE" == "persistent" ]]; then
   echo "Verified certificate-backed designated requirement:"
   printf '%s\n' "$DESIGNATED_REQUIREMENT" | grep 'designated =>'
 fi
-rm -rf "$APP"
+# Never replace an unrelated app at the canonical path. Existing legacy
+# Cineo.app and Cineo Stop Fix.app bundles elsewhere are left untouched.
+if [[ -e "$APP" ]]; then
+  [[ -f "$APP/Contents/Info.plist" ]] || {
+    echo "Refusing to replace an unexpected file at $APP" >&2; exit 3;
+  }
+  installed_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" 2>/dev/null || true)"
+  [[ "$installed_id" == "$APP_BUNDLE_ID" ]] || {
+    echo "Refusing to replace $APP: different app bundle ID ($installed_id)." >&2
+    exit 3
+  }
+  rm -rf "$APP"
+fi
 mv "$STAGE" "$APP"
 echo "PASS: Xcode-free native Cineo screen capture app compiled and signed ($SIGNING_MODE)."
 echo "App: $APP"
