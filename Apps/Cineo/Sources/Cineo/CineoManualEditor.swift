@@ -15,6 +15,8 @@ final class CineoEditorModel: ObservableObject {
 
     @Published var sourceURL: URL?
     @Published var title = ""
+    @Published var sourcePixelWidth = 1512
+    @Published var sourcePixelHeight = 982
     @Published var mode: Mode = .manual
     @Published var duration: Double = 0
     @Published var selectedTime: Double = 0
@@ -70,6 +72,8 @@ final class CineoEditorModel: ObservableObject {
                 return
             }
             duration = t.seconds
+            sourcePixelWidth = Int(size.width)
+            sourcePixelHeight = Int(size.height)
             selectedTime = 0
             zoom = 1
             focusX = 0.5
@@ -99,7 +103,7 @@ final class CineoEditorModel: ObservableObject {
     func scrub(_ seconds: Double) {
         selectedTime = min(max(seconds, 0), max(0, duration - 0.05))
         if let state = try? currentPlan.evaluate(
-            time: selectedTime, sourceWidth: 1512, sourceHeight: 982
+            time: selectedTime, sourceWidth: sourcePixelWidth, sourceHeight: sourcePixelHeight
         ) {
             zoom = 1 / state.cropWidth
             focusX = state.cropX + state.cropWidth / 2
@@ -121,7 +125,7 @@ final class CineoEditorModel: ObservableObject {
 
     func choosePoint(x: Double, y: Double) {
         guard let state = try? currentPlan.evaluate(
-            time: selectedTime, sourceWidth: 1512, sourceHeight: 982
+            time: selectedTime, sourceWidth: sourcePixelWidth, sourceHeight: sourcePixelHeight
         ) else { return }
         guard x >= 0, x <= 1, y >= 0, y <= 1 else { return }
         // Convert canvas coords into cropped source coords; the scene is
@@ -264,7 +268,7 @@ final class CineoEditorModel: ObservableObject {
                     CIImage(cgImage: cgImage), at: seconds, with: plan
                 )
                 let canvas = CGRect(x: 0, y: 0,
-                                    width: plan.outputWidth, height: plan.outputHeight)
+                                    width: CGFloat(plan.outputWidth), height: CGFloat(plan.outputHeight))
                 guard let rendered = CIContext().createCGImage(composited, from: canvas) else {
                     status = "Impossibile renderizzare l'anteprima."
                     return
