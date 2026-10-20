@@ -10,6 +10,7 @@ on:
       - '.github/workflows/p1-native-bootstrap.yml'
       - 'docs/decisions/**'
       - 'scripts/native-smoke-doctor.sh'
+      - 'scripts/test-cineo.sh'
   push:
     branches: [main]
     paths:
@@ -18,6 +19,7 @@ on:
       - 'native/OrbitIntegration/**'
       - 'Packages/CineoDirector/**'
       - 'scripts/native-smoke-doctor.sh'
+      - 'scripts/test-cineo.sh'
       - '.github/workflows/p1-native-bootstrap.yml'
   workflow_dispatch:
 
@@ -40,6 +42,11 @@ jobs:
           bash -n scripts/bootstrap-native.sh
           python3 -m py_compile scripts/cineo_native_overlay.py
           bash scripts/bootstrap-native.sh --plan
+      - name: Check one-command runner on real macOS
+        run: |
+          bash -n scripts/test-cineo.sh
+          bash scripts/test-cineo.sh --preflight
+          bash scripts/test-cineo.sh --help
       - name: Compile isolated Cineo bundle
         run: bash scripts/bootstrap-native.sh --build
       - name: Native bridge tests with synthetic telemetry (no screen permissions)
