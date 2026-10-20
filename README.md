@@ -6,9 +6,9 @@ Cineo is a **planned native, local-first macOS application** for creating cinema
 
 The goal: record a workflow, get a polished first edit with purposeful zooms and cursor motion, refine the details only when necessary, then export a clear product video for a website, launch post, presentation or tutorial.
 
-> **Project status — P1 experimental native bootstrap (October 2026).**
+> **Project status — native CLT-only Capture Alpha + experimental Orbit editor (October 2026).**
 >
-> The documentation describes the **intended product**, not a released application. P0 selected Orbit **conditionally**, after a 3/3 successful Xcode compile matrix, and P1 now produces an **unsigned Cineo-named staging app** from a pinned upstream checkout. Real signed Mac launch, TCC capture/audio and edit/export video validation remain mandatory and unverified. Some engineering-template materials still need migration.
+> `Apps/Cineo` is an independent SwiftPM/SwiftUI macOS screen recorder that compiles using **Apple Command Line Tools without Xcode.app**. It saves local H.264 MP4 captures and has not yet been validated with live TCC capture on a physical Mac. The larger Orbit-based editor/Smart Zooms integration currently remains a separate Xcode-dependent legacy path; it is **not** included in the CLT Capture Alpha. Cineo is not a released product.
 
 ## The experience we want
 
@@ -50,27 +50,27 @@ Cineo should focus on **the feature's result**, not blindly zooming on every cli
 
 We intentionally will **not** introduce multiple parallel compositor/timeline implementations or mandatory AI into the MVP.
 
-## Try Cineo on a Mac
+## Try Cineo without Xcode.app
 
-A [single test script](docs/testing/local-test-runner.md) covers diagnostics, Swift unit tests, unsigned native build/integration tests, an explicitly signed interactive launch and local MP4 inspection.
+The default test runner now uses SwiftPM plus **Apple Command Line Tools** only. No Xcode.app or Apple Developer Team is needed for the Capture Alpha.
 
 ```bash
 bash scripts/test-cineo.sh --preflight
 bash scripts/test-cineo.sh --quick
 bash scripts/test-cineo.sh --native
-
-# Only when ready to open the local signed development app:
-CINEO_APPLE_TEAM=YOUR10CHARID bash scripts/test-cineo.sh --interactive
+bash scripts/test-cineo.sh --interactive
 ```
 
-Native CI tests are synthetic. Real screen recording, OS permission approval, audio and video exports must still be checked by a person on a Mac.
+The interactive command opens the local recorder; you can capture your main display and save MP4 files under `~/Movies/Cineo/`. Real permission handling and video playback still require a physical Mac smoke test. **This alpha does not yet include the Orbit editor, automatic zooms or audio.**
 
-## Next step: P1 native app smoke
+See [Xcode-free Mac testing](docs/testing/local-test-runner.md), [SwiftPM capture source](Apps/Cineo) and [the build decision](docs/decisions/0002-xcode-free-build.md).
 
-1. Run `bash scripts/bootstrap-native.sh --plan` to inspect the pinned native stage.
-2. On a compatible Mac with Xcode 26+, run `bash scripts/bootstrap-native.sh --build` to generate and verify the **unsigned** prototype.
-3. Sign/launch the staged native app with an authorized Apple development identity and execute the real TCC/capture/audio/export checklist in [development guide](docs/development.md).
-4. Continue native Cineo UX and safe fork reduction only after that evidence; never treat green compile as proof of real recording.
+## Next step: finish CLT-first P1
+
+1. Verify the real `Cineo.app` created by `scripts/build-cineo-clt.sh` launches and produces a playable H.264 MP4 from ScreenCaptureKit on an Apple Silicon Mac.
+2. Migrate audio selection and cursor input telemetry to the SwiftPM app.
+3. Port one cohesive editor/compositor/timebase from the pinned Orbit reference, then connect CineoProject and CineoDirector. Avoid importing a competing renderer.
+4. Confirm 16:9/9:16 edits and export through real video evidence. Keep the legacy Xcode path as a temporary reference, never the required local build.
 
 See [the roadmap](docs/roadmap.md) for task IDs, delivery phases, acceptance criteria and stop conditions.
 
