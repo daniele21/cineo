@@ -9,59 +9,79 @@ APP="$ROOT/DerivedData/Build/Products/Debug/Cineo.app"
 
 usage() {
   cat <<'EOF'
-Cineo macOS test runner (execute from anywhere)
-  bash scripts/test-cineo.sh --preflight     Check Xcode, Swift, signing availability.
-  bash scripts/test-cineo.sh --quick         Run 3 pure Swift test suites.
-  bash scripts/test-cineo.sh --native        Unsigned Cineo build + synthetic native tests.
-  CINEO_APPLE_TEAM=YOUR10CHARID bash scripts/test-cineo.sh --interactive
-                                             Sign, verify, open app for manual capture.
-  bash scripts/test-cineo.sh --exports --landscape "/path/to/16x9.mp4" \
-    --portrait "/path/to/9x16.mp4" [--require-audio]
-                                             Verify exported MP4 tracks locally.
-  bash scripts/test-cineo.sh --help
-Stage override: CINEO_NATIVE_ROOT=/path/to/temporary/stage
-The native/bootstrap stage gets reset on rebuild; don't edit sources there.
-A green build does not prove TCC, real capture or actual media quality.
+Cineo macOS tests — default build uses CLT + SwiftPM, no Xcode.app
+  bash scripts/test-cineo.sh --preflight    Check macOS Command Line Tools.
+  bash scripts/test-cineo.sh --quick        Run Swift Testing with CLT paths.
+  bash scripts/test-cineo.sh --native       Compile Cineo Capture Alpha using CLT.
+  bash scripts/test-cineo.sh --interactive  Build + open local ad-hoc-signed Cineo.
+  bash scripts/test-cineo.sh --exports --landscape "/path/video16x9.mp4"
+                                           Inspect exported H.264 MP4 locally.
+  bash scripts/test-cineo.sh --legacy-orbit-native
+  CINEO_APPLE_TEAM=TEAMID bash scripts/test-cineo.sh --legacy-orbit-interactive
+                                           Old Orbit editor, Xcode-dependent.
+Cineo Capture Alpha records a display to Movies/Cineo without audio;
+Orbit editor and Smart Zooms are NOT yet part of this CLT build.
 EOF
 }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 2; }
 require_command() { command -v "$1" >/dev/null 2>&1 || fail "Missing command: $1"; }
 require_mac() { [[ "$(uname -s)" == Darwin ]] || fail "This test mode requires macOS."; }
+configure_clt() {
+  require_mac
+  if [[ -z "${DEVELOPER_DIR:-}" ]]; then
+    export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+  fi
+  [[ -d "$DEVELOPER_DIR" ]] || fail "Apple Command Line Tools missing. Run xcode-select --install."
+  for tool in swift xcrun codesign; do require_command "$tool"; done
+}
 
 preflight() {
-  require_mac
-  printf '\n== Cineo development Mac preflight ==\n'
+  configure_clt
+  printf '== Cineo Xcode-free preflight ==\n'
   printf 'Architecture: '; uname -m
-  for command in swift xcodebuild python3 git; do require_command "$command"; done
-  printf 'Swift: '; swift --version | head -n 1
-  xcodebuild -version
   printf 'Developer directory: '; xcode-select -p
-  printf 'Apple Development signing identities: '
-  if command -v security >/dev/null 2>&1; then
-    security find-identity -v -p codesigning 2>/dev/null | grep -c 'Apple Development' || true
-  else printf 'unknown\n'; fi
-  printf 'Build stage: %s\n' "$ROOT"
-  printf 'App destination: %s\n' "$APP"
-  printf 'Preflight done; no app compiled or launched.\n'
+  printf 'Swift: '; swift --version | head -n 1
+  printf 'macOS SDK: '; xcrun --sdk macosx --show-sdk-path
+  if [[ -d "$DEVELOPER_DIR/Library/Developer/Frameworks/Testing.framework" ]]; then
+    echo 'Swift Testing framework: present (CLT wrapper enabled)'
+  else
+    echo 'Swift Testing framework: not found; --quick may need a newer CLT.'
+  fi
+  printf 'No Xcode.app or Apple Developer Team required.\n'
 }
-
 quick() {
-  require_command swift
+  if [[ "$(uname -s)" == Darwin ]]; then configure_clt; fi
   for name in CineoDirector CineoProject CineoEditPlanner; do
     printf '\n== Testing %s ==\n' "$name"
-    swift test --package-path "Packages/$name"
+    bash scripts/swift-test-clt.sh --package-path "Packages/$name"
   done
-  printf '\nPASS: Pure Swift camera, project and edit-plan suites.\n'
+  printf '\nPASS: Swift project, camera and edit-planner tests.\n'
 }
-
 native() {
+  configure_clt
+  bash scripts/build-cineo-clt.sh
+  echo 'Native CLT build successful. No Screen Recording permission was requested.'
+}
+interactive() {
+  configure_clt
+  bash scripts/build-cineo-clt.sh
+  local app="${CINEO_CLT_BUILD_ROOT:-${TMPDIR:-/tmp}/cineo-clt-native}/Cineo.app"
+  open "$app"
+  cat <<'EOF'
+Cineo Capture Alpha opened.
+1. Choose Record main display and grant permission in macOS if prompted.
+2. Move the cursor and make several clicks in non-sensitive demo content.
+3. Choose Stop. Wait for "MP4 finalized" before inspecting the file.
+4. Open "Show recordings" to find Movies/Cineo/*.mp4.
+Limitations: no audio or Orbit editor/Smart Zooms in this CLT alpha yet.
+EOF
+}
+legacy_orbit_native() {
   require_mac
-  for command in xcodebuild python3 git; do require_command "$command"; done
-  printf '\n== Pinned unsigned Cineo native build ==\n'
+  for cmd in xcodebuild python3 git; do require_command "$cmd"; done
   bash scripts/bootstrap-native.sh --build
   bash scripts/native-smoke-doctor.sh --app "$APP" --allow-unsigned
   mkdir -p "$ROOT/logs"
-  printf '\n== Native camera bridge and motion tests (synthetic, no TCC) ==\n'
   (
     set -o pipefail
     xcodebuild -project "$ROOT/orbit/Reco.xcodeproj" \
@@ -69,38 +89,15 @@ native() {
       -derivedDataPath "$ROOT/DerivedData" -parallel-testing-enabled NO \
       -only-testing:RecoTests/CineoAutoZoomBridgeTests \
       -only-testing:RecoTests/CineoCameraMotionTests \
-      CODE_SIGNING_ALLOWED=NO test \
-      2>&1 | tee "$ROOT/logs/cineo-native-tests.log"
+      CODE_SIGNING_ALLOWED=NO test 2>&1 | tee "$ROOT/logs/cineo-native-tests.log"
   )
-  printf '\nPASS: Native Cineo build + synthetic editor/camera tests.\n'
-  printf 'NOT CHECKED: Signed launch, TCC, real capture, export or media sync.\n'
 }
-
-interactive() {
+legacy_orbit_interactive() {
   require_mac
   require_command xcodebuild
-  [[ -n "${CINEO_APPLE_TEAM:-}" ]] || fail "Set CINEO_APPLE_TEAM to your Apple Development Team ID configured in Xcode."
-  printf '\n== Signed Cineo developer build ==\n'
+  [[ -n "${CINEO_APPLE_TEAM:-}" ]] || fail 'CINEO_APPLE_TEAM required for legacy Orbit signing.'
   bash scripts/bootstrap-native.sh --dev-build
-  bash scripts/native-smoke-doctor.sh --app "$APP"
-  printf '\nLaunching the signed test app. macOS permissions remain under your control.\n'
   open "$APP"
-  cat <<'EOF'
-
-MANUAL SMOKE CHECKLIST — only use non-sensitive demo content
-  [ ] Record a display for ~30 s while clicking, scrolling and opening a menu.
-  [ ] Record a selected window. Try microphone off, then enabled.
-  [ ] Stop and reopen the saved recording in the editor.
-  [ ] Smart Zooms: compare Subtle, Balanced, Dynamic.
-  [ ] Adjust a manual zoom; regenerate and check it is preserved.
-  [ ] Export 1920x1080 landscape and 1080x1920 portrait H.264 MP4 files.
-  [ ] View results for text clarity, zoom, cursor, audio synchronization.
-  [ ] Test permission denial/retry and stop/cancel without data loss.
-
-Then verify MP4 structure using --exports. See docs/testing/native-smoke.md.
-Do not upload footage, private paths or secrets to a public repository.
-EOF
-  printf '\nApp: %s\n' "$APP"
 }
 
 inspect_export() {
@@ -153,6 +150,8 @@ case "$MODE" in
   --quick) (( $# == 0 )) || fail "Unexpected arguments"; quick ;;
   --native) (( $# == 0 )) || fail "Unexpected arguments"; native ;;
   --interactive) (( $# == 0 )) || fail "Unexpected arguments"; interactive ;;
+  --legacy-orbit-native) (( $# == 0 )) || fail "Unexpected arguments"; legacy_orbit_native ;;
+  --legacy-orbit-interactive) (( $# == 0 )) || fail "Unexpected arguments"; legacy_orbit_interactive ;;
   --exports) exports "$@" ;;
   *) usage >&2; fail "Unknown test mode: $MODE" ;;
 esac
