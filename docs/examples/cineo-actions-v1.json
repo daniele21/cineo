@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "timebase": "output",
+  "stage": {
+    "aspect": "16:9",
+    "background": "dark",
+    "padding": 0.07
+  },
+  "actions": [
+    {
+      "id": "zoom-dashboard",
+      "type": "camera.zoom",
+      "start": 2.0,
+      "end": 5.2,
+      "target": { "x": 0.72, "y": 0.33 },
+      "scale": 1.7,
+      "transition": { "in": 0.35, "out": 0.4 }
+    },
+    {
+      "id": "zoom-result",
+      "type": "camera.zoom",
+      "start": 9.0,
+      "end": 12.5,
+      "target": { "x": 0.36, "y": 0.70 },
+      "scale": 1.5,
+      "transition": { "in": 0.4, "out": 0.5 }
+    }
+  ]
+}

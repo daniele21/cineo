@@ -1,0 +1,27 @@
+name: Cineo Auto Edit quality baseline
+
+on:
+  pull_request:
+    paths:
+      - 'docs/testing/autoedit-acceptance.md'
+      - 'scripts/test-autoedit-gates.sh'
+      - '.github/workflows/autoedit-quality-gates.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  existing-pure-swift:
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.2
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run available deterministic packages
+        run: bash scripts/test-autoedit-gates.sh
+      - name: Reminder of remaining physical-Mac tests
+        run: |
+          echo 'No real H264 rendered here; Mac video rendering and TCC require separate evidence.'
+          echo 'See docs/testing/autoedit-acceptance.md'

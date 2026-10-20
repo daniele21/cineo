@@ -42,7 +42,29 @@ jobs:
       - name: Generate and re-render synthetic H264 with shared preview/export compositor
         run: |
           swift run --package-path Packages/CineoScene --configuration release cineo-scene-smoke
+      - name: Reject SwiftUI @State macros unavailable in Apple CLT
+        run: |
+          # Apple CLT Swift 6.3 ships SwiftUI but not the host SwiftUIMacros
+          # plugin required by @State. @StateObject/ObservableObject work.
+          if grep -En '@State[[:space:]]' Apps/Cineo/Sources/Cineo/*.swift; then
+            echo 'ERROR: SwiftUI @State macro requires unavailable CLT SwiftUIMacros. Use @StateObject with an ObservableObject.' >&2
+            exit 1
+          fi
       - name: Build integrated SwiftUI Cineo Dev app without Xcode
         run: |
           swift build --package-path Apps/Cineo --configuration release
           echo 'CLT Studio integration compiles. Interactive UI/TCC requires a physical Mac test.'
+      - name: Package and verify official branded app (CI-only ad-hoc signature)
+        env:
+          CINEO_SIGNING_MODE: adhoc
+          CINEO_CLT_BUILD_ROOT: ${{ runner.temp }}/cineo-branded
+        run: |
+          bash scripts/build-cineo-clt.sh
+          app="$CINEO_CLT_BUILD_ROOT/Cineo Dev.app"
+          test -s "$app/Contents/Resources/Cineo.icns"
+          test -s "$app/Contents/Resources/CineoSymbol.png"
+          test -s "$app/Contents/Resources/CineoWordmark.png"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Contents/Info.plist")" = Cineo
+          codesign --verify --strict "$app"
+          echo "PASS: official Cineo assets present inside signed CLT app."
+

@@ -126,3 +126,66 @@ The presence of a stale window invalidates runtime conclusions about fixes.
 5. If a failure persists, copy the Activity log and record macOS version, launch method and the numeric error domain/code. Leave any failed media in place for recovery/inspection.
 
 A green GitHub Actions CLT build proves compilation/signing, **not** the real ScreenCaptureKit capture-to-MP4 flow. This change remains a candidate until the physical-Mac regression passes.
+
+
+## Candidate G1 project round-trip — integration PR #56 (not yet Mac-verified)
+
+This integration branch layers the existing `CineoProject` package over the PR #55 local Studio editor. All commands below use the **same local Cineo checkout and application identity**, not a cloned worktree or detached checkout.
+
+```bash
+cd ~/Personal/cineo
+git status --short                       # preserve any local changes first
+git fetch origin
+git switch feat/cineo-mvp-integration    # existing branch; no git detach
+git pull --ff-only
+bash scripts/test-cineo.sh --interactive # CLT-only; only ~/Applications/Cineo Dev.app
+```
+
+In the app select **Apri MP4 / progetto…**, pick a verified unrotated H.264 MP4, apply one manual keyframe and change the stage background. Click **Salva progetto Cineo**. This creates a unique `~/Movies/Cineo/Projects/<uuid>.cineo` package with `Media/capture-*.mp4`, `manifest.json` and `scene.json`. The initial recording remains where it was. Exit the editor, choose **Apri MP4 / progetto…** again, and select that `.cineo` folder. Confirm the same keyframe positions, canvas, background and preview are restored. Export via **Esporta MP4**, check playback in QuickTime and ensure the source hash has not changed. **Annulla export** may be used during rendering; no original should ever be deleted.
+
+This is not a multi-clip edit model yet. Studio intentionally rejects packages with edits, speed changes, or multiple media sources rather than silently producing inaccurate video. The integration does not yet attach click telemetry to ScreenCaptureKit, does not record audio, and does not expose CLI rendering. A CI synthetic H.264 smoke is not proof of a real macOS permission/restart or actual user recording. Do not merge PR #56 until physical-Mac G0/G1 checks pass, and do not merge both competing copies of CineoScene from #50 and #55.
+
+## Import documented actions JSON (integration PR #56)
+
+You can use Cineo Studio **manually as before** or supply a local, versioned **Cineo Actions JSON v1** file. See [format specification](../../docs/automation/cineo-actions-v1.md) and [sample](../../docs/examples/cineo-actions-v1.json).
+
+1. Open a video **at least 13 seconds** long, or a supported `.cineo` project.
+2. Click **Importa istruzioni…** in Cineo Studio. Select the example JSON or your custom plan.
+3. When manual keyframes already exist, explicitly **Importa e sostituisci**, or cancel with no changes.
+4. Cineo compiles `camera.zoom` actions to actual editable camera keyframes (overview → zoom-in → hold → zoom-out), updates the stage, moves to the first focus, and refreshes the real composed preview frame. Click the named action markers to inspect other segments.
+5. Adjust keyframes, focus and stage as usual. The canonical scene is saved to `scene.json` for a Cineo project or the existing sidecar for an MP4; the original source remains untouched. Export with the regular CineoScene MP4 renderer.
+
+The imported JSON is **not executed as code**, and unknown effects such as captions or cursor highlights are rejected instead of silently ignored. It is an import format rather than yet a two-way JSON editor; manual changes update the scene recipe. **The preview is still frame-at-a-time** until real-time Play/Pause is implemented. No validated Mac physical UI/video evidence is claimed solely from this branch.
+
+
+
+## Show the matching instructions for the current Studio edit (candidate PR #56)
+
+Open a supported MP4 or `.cineo` video and edit zoom/focus as usual. In Cineo Studio click **Mostra istruzioni**. A native sheet offers:
+
+- **Montaggio attuale**: current camera keyframes and stage serialized as exactly reimportable Cineo Actions JSON, not a loose natural-language approximation.
+- **Guida**: all v1 options, coordinate ranges, expected timing and unsupported action types.
+- **Esempi**: a complete `camera.zoom` shot and an exact `camera.keyframe` sequence.
+- **Copia JSON** / **Salva JSON…** on the first tab; **Importa istruzioni…** in Studio can reapply that JSON to the open media with confirmation before replacing existing camera keys.
+
+The equivalent export writes `camera.keyframe` actions because arbitrary hand-authored keyframes cannot be reliably compressed back to one semantic `camera.zoom` shot. Each keyframe uses the same `time`, `target.x/y`, and `scale` as the underlying `CineoScenePlan`; the exporter recompiles its own JSON and refuses to show a recipe if the scene differs. `camera.zoom` remains the simpler way to author complete in–hold–out motion. Imported markers are cleared after manual camera changes to avoid stale action labels; the actual keyframes remain fully editable.
+
+See [`docs/automation/cineo-actions-v1.md`](../../docs/automation/cineo-actions-v1.md). This candidate requires GitHub CLT CI and real Mac visual tests. The sheet describes snapshot frames and not animated Play/Pausa yet.
+
+
+## Pre-export live preview and precise frame scrubbing (candidate PR #56)
+
+Open an MP4 or `.cineo` in Cineo Studio, then use **Play / Pausa** next to the timeline. Cineo uses `AVPlayerItemVideoOutput` to decode actual source frames and evaluates every displayed frame with **the same `CineoSceneFrameRenderer.compose` used by final export**. The editor presents a bounded 960px-wide proxy of the canonical 1920×1080 (or 1080×1920) composition to reduce GPU cost. It never hides the original source or creates a temporary final MP4 merely for preview.
+
+- The time indicator follows the video's actual playback clock and skips decoded frames when the device cannot render every frame; no fake smoothness or fabricated frame count. **Anteprima: N fps visualizzati** shows the number of frames actually presented each second.
+- **‹ Frame** and **Frame ›** step by one source frame using the recording's nominal frame rate (default 30fps if unavailable). Manual dragging still displays correctly composited frames, with a shorter 35ms request-coalescing window and reused GPU context/image generator.
+- Scrubbing or changing the camera pauses playback; export pauses playback too. Playback audio is intentionally muted because the current Cineo Capture Alpha does not record system audio. Source recordings are never modified.
+- **Known limitations:** playable previews are provisional until measured on a real Mac. The preview may drop frames on large/high-rate footage and therefore is not promised at native 30/60fps. Frame stepping is approximate for variable-frame-rate sources. Rendered proxy frames use the same geometry and easing but lower raster resolution; exact output still needs MP4 quality checking. Only supported single-video, identity-transform sources are opened at present.
+
+A suggested G1 verification on the physical Mac: import a 25s MP4, create 2 manual or JSON zooms, click **Play**, check visible zoom-in/hold/out without exporting, pause, step through 5 frames, switch 16:9→9:16, resume, export and compare representative timestamps. Verify after editing the original source hash is identical.
+
+## Brand Kit v1.0 (supplied 2026-10-20)
+
+The native capture/editor headers now use the **Cursor Zoom** layered mark, the ocean accent (`#107C99`), accessible native text and optional Inter only when already installed. The official supplied app icon and PNGs are embedded as signed bundle resources by `scripts/build-cineo-clt.sh`. **No runtime downloads or full Xcode.app are required**, and user video exports are **not automatically watermarked** with Cineo branding.
+
+Asset source and provenance: [Assets/Brand/README.md](../../Assets/Brand/README.md). The phrase "Il focus su ciò che conta." is provisional source-kit copy and should be approved before commercial publication.
