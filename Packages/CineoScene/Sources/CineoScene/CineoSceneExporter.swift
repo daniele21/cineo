@@ -110,26 +110,10 @@ public struct CineoSceneExporter: Sendable {
                 guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &newBuffer) == kCVReturnSuccess,
                       let newBuffer
                 else { throw CineoSceneError.writerFailed }
-                let state = try plan.evaluate(
-                    time: relativePTS.seconds,
-                    sourceWidth: CVPixelBufferGetWidth(inputBuffer),
-                    sourceHeight: CVPixelBufferGetHeight(inputBuffer)
-                )
                 let raw = CIImage(cvPixelBuffer: inputBuffer)
-                let extent = raw.extent
-                let crop = CGRect(
-                    x: extent.minX + state.cropX * extent.width,
-                    y: extent.minY + (1 - state.cropY - state.cropHeight) * extent.height,
-                    width: state.cropWidth * extent.width,
-                    height: state.cropHeight * extent.height
+                let edited = try CineoSceneFrameRenderer.compose(
+                    raw, at: relativePTS.seconds, with: plan
                 )
-                let scale = state.outputWidth / crop.width
-                let edited = raw.cropped(to: crop)
-                    .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
-                    .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-                    .transformed(by: CGAffineTransform(translationX: state.outputX, y: state.outputY))
-                    .composited(over: bg)
-                    .cropped(to: outputBounds)
                 ciContext.render(edited, to: newBuffer, bounds: outputBounds, colorSpace: colorSpace)
                 while !writerInput.isReadyForMoreMediaData {
                     try Task.checkCancellation()
