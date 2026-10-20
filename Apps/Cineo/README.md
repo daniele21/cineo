@@ -157,3 +157,17 @@ You can use Cineo Studio **manually as before** or supply a local, versioned **C
 
 The imported JSON is **not executed as code**, and unknown effects such as captions or cursor highlights are rejected instead of silently ignored. It is an import format rather than yet a two-way JSON editor; manual changes update the scene recipe. **The preview is still frame-at-a-time** until real-time Play/Pause is implemented. No validated Mac physical UI/video evidence is claimed solely from this branch.
 
+
+
+## Show the matching instructions for the current Studio edit (candidate PR #56)
+
+Open a supported MP4 or `.cineo` video and edit zoom/focus as usual. In Cineo Studio click **Mostra istruzioni**. A native sheet offers:
+
+- **Montaggio attuale**: current camera keyframes and stage serialized as exactly reimportable Cineo Actions JSON, not a loose natural-language approximation.
+- **Guida**: all v1 options, coordinate ranges, expected timing and unsupported action types.
+- **Esempi**: a complete `camera.zoom` shot and an exact `camera.keyframe` sequence.
+- **Copia JSON** / **Salva JSON…** on the first tab; **Importa istruzioni…** in Studio can reapply that JSON to the open media with confirmation before replacing existing camera keys.
+
+The equivalent export writes `camera.keyframe` actions because arbitrary hand-authored keyframes cannot be reliably compressed back to one semantic `camera.zoom` shot. Each keyframe uses the same `time`, `target.x/y`, and `scale` as the underlying `CineoScenePlan`; the exporter recompiles its own JSON and refuses to show a recipe if the scene differs. `camera.zoom` remains the simpler way to author complete in–hold–out motion. Imported markers are cleared after manual camera changes to avoid stale action labels; the actual keyframes remain fully editable.
+
+See [`docs/automation/cineo-actions-v1.md`](../../docs/automation/cineo-actions-v1.md). This candidate requires GitHub CLT CI and real Mac visual tests. The sheet describes snapshot frames and not animated Play/Pausa yet.
