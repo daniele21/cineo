@@ -22,17 +22,45 @@ public struct SourceAttentionEvent: Codable, Sendable, Equatable {
     }
 }
 
+/// Minimal edit dependency snapshot. Avoid storing source media paths or user
+/// content in an automatic camera suggestion sidecar.
+public struct CameraEditState: Codable, Sendable, Equatable {
+    public struct SourceShape: Codable, Sendable, Equatable {
+        public let id: UUID
+        public let duration: Double
+        public let pixelWidth: Int
+        public let pixelHeight: Int
+    }
+
+    public let canvas: Canvas
+    public let sources: [SourceShape]
+    public let edits: [SourceEdit]
+
+    public init(project: CineoManifest) {
+        self.canvas = project.canvas
+        self.sources = project.sources.map {
+            SourceShape(id: $0.id, duration: $0.duration,
+                        pixelWidth: $0.pixelWidth, pixelHeight: $0.pixelHeight)
+        }
+        self.edits = project.edits
+    }
+}
+
 public struct SuggestedCameraPlan: Codable, Sendable, Equatable {
-    public static let supportedVersion = 1
+    public static let supportedVersion = 2
     public let schemaVersion: Int
     public let projectID: UUID
+    /// Any trim, clip reorder, speed, output shape or source timing change
+    /// invalidates the plan even if total output duration stays unchanged.
+    public let editState: CameraEditState
     /// Output timeline duration (seconds) used to generate this plan.
     public let outputDuration: Double
     public let shots: [CameraShot]
 
-    public init(projectID: UUID, outputDuration: Double, shots: [CameraShot]) {
+    public init(project: CineoManifest, outputDuration: Double, shots: [CameraShot]) {
         self.schemaVersion = Self.supportedVersion
-        self.projectID = projectID
+        self.projectID = project.projectID
+        self.editState = CameraEditState(project: project)
         self.outputDuration = outputDuration
         self.shots = shots
     }
@@ -40,6 +68,7 @@ public struct SuggestedCameraPlan: Codable, Sendable, Equatable {
     public func validate(against project: CineoManifest) throws {
         guard schemaVersion == Self.supportedVersion,
               projectID == project.projectID,
+              editState == CameraEditState(project: project),
               outputDuration.isFinite, outputDuration >= 0,
               abs(outputDuration - (try TimelineMapper.outputDuration(for: project))) < 0.000001
         else { throw SuggestedCameraError.incompatibleProject }
@@ -95,7 +124,7 @@ public struct CineoEditPlanner: Sendable {
             outputOffset += (clip.sourceEnd - clip.sourceStart) / clip.speed
         }
         let shots = camera.suggest(events: timelineEvents, duration: duration)
-        let plan = SuggestedCameraPlan(projectID: project.projectID,
+        let plan = SuggestedCameraPlan(project: project,
                                        outputDuration: duration, shots: shots)
         try plan.validate(against: project)
         return plan
