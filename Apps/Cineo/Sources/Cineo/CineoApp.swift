@@ -4,42 +4,87 @@ import AVFoundation
 import CoreMedia
 import CoreVideo
 import AppKit
+import OSLog
 
-/// First independent Cineo app: real macOS capture backed directly by
-/// ScreenCaptureKit's recording output. No Xcode project or Orbit binaries.
 @main
 struct CineoApp: App {
     @StateObject private var recorder = CineoScreenRecorder()
 
     var body: some Scene {
         WindowGroup("Cineo") {
-            ContentView(recorder: recorder)
+            CaptureDashboard(recorder: recorder)
         }
         .windowResizability(.contentSize)
     }
 }
 
-private struct ContentView: View {
+enum CapturePhase: String {
+    case ready
+    case preparing
+    case recording
+    case finalizing
+    case verifying
+    case complete
+    case failed
+
+    var isWorking: Bool {
+        self == .preparing || self == .finalizing || self == .verifying
+    }
+
+    var name: String {
+        switch self {
+        case .ready: "Ready"
+        case .preparing: "Preparing"
+        case .recording: "Recording"
+        case .finalizing: "Finalizing MP4"
+        case .verifying: "Verifying MP4"
+        case .complete: "Saved"
+        case .failed: "Error"
+        }
+    }
+}
+
+struct CaptureLogEntry: Identifiable {
+    let id = UUID()
+    let date = Date()
+    let level: Level
+    let message: String
+
+    enum Level {
+        case info, warning, error
+    }
+}
+
+private struct CaptureDashboard: View {
     @ObservedObject var recorder: CineoScreenRecorder
 
+    private var timeText: String {
+        let total = Int(recorder.recordedSeconds)
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    private var fileSizeText: String {
+        recorder.recordedBytes > 0
+            ? ByteCountFormatter.string(fromByteCount: recorder.recordedBytes, countStyle: .file)
+            : "Waiting for data…"
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
                 Image(systemName: "record.circle")
-                    .font(.largeTitle)
+                    .font(.system(size: 32))
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Cineo").font(.title.bold())
-                    Text("Local-first native capture • SwiftPM + Command Line Tools")
+                    Text("Local-first screen capture • SwiftPM + Command Line Tools")
                         .foregroundStyle(.secondary)
                 }
             }
             Divider()
-            Text("Record the main display to a local H.264 MP4. No cloud upload.")
+            Text("Capture your display to a local H.264 MP4.")
                 .font(.headline)
-            Text("The editor and automatic cinematic zooms are not yet connected to this CLT-native app.")
-                .foregroundStyle(.secondary)
             HStack(spacing: 12) {
-                if recorder.isRecording {
+                if recorder.phase == .recording {
                     Button {
                         Task { await recorder.stop() }
                     } label: {
@@ -54,67 +99,231 @@ private struct ContentView: View {
                         Label("Record main display", systemImage: "record.circle")
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(recorder.phase.isWorking)
                 }
                 Button {
                     recorder.openRecordingsFolder()
                 } label: {
                     Label("Show recordings", systemImage: "folder")
                 }
-                .disabled(recorder.isBusy)
+                if let url = recorder.lastCompletedVideo, recorder.phase == .complete {
+                    Button {
+                        recorder.openLastRecording()
+                    } label: {
+                        Label("Open MP4", systemImage: "play.rectangle")
+                    }
+                    .help(url.lastPathComponent)
+                }
             }
-            .disabled(recorder.isBusy)
-            HStack {
-                Image(systemName: recorder.isRecording ? "record.circle.fill" : "info.circle")
-                    .foregroundStyle(recorder.isRecording ? .red : .secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    if recorder.phase == .recording {
+                        Image(systemName: "record.circle.fill")
+                            .foregroundStyle(.red)
+                            .symbolEffect(.pulse)
+                    } else if recorder.phase.isWorking {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: recorder.phase == .complete ? "checkmark.circle.fill" :
+                              recorder.phase == .failed ? "exclamationmark.triangle.fill" : "info.circle")
+                            .foregroundStyle(recorder.phase == .failed ? .orange : .secondary)
+                    }
+                    Text(recorder.phase.name)
+                        .font(.headline)
+                    Spacer()
+                    Text(timeText)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
                 Text(recorder.status)
+                    .font(.callout)
                     .textSelection(.enabled)
+
+                HStack(spacing: 20) {
+                    Label("Captured: \(timeText)", systemImage: "clock")
+                    Label("File: \(fileSizeText)", systemImage: "doc")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if recorder.phase == .finalizing || recorder.phase == .verifying {
+                    Text("Finalization: \(recorder.finalizationElapsedSeconds) s elapsed • waiting for system confirmation. No reliable percentage is available.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if recorder.finalizationElapsedSeconds >= 15 {
+                        Text("This is taking longer than usual. The source file is not deleted. Check the activity log for errors.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+                if let file = recorder.currentFilename {
+                    Text(file)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
             }
-            .font(.callout)
-            Text("Screen Recording permission is requested by macOS only when capture starts. You control permission and may revoke it in System Settings.")
+            .padding(14)
+            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Activity log (\(recorder.logs.count))", systemImage: "list.bullet.rectangle")
+                        .font(.callout.weight(.medium))
+                    Spacer()
+                    Button("Copy diagnostics") {
+                        recorder.copyDiagnostics()
+                    }
+                    .font(.caption)
+                }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(recorder.logs) { entry in
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(entry.date, style: .time)
+                                        .monospacedDigit()
+                                        .foregroundStyle(.secondary)
+                                    Image(systemName: entry.level == .error ? "exclamationmark.circle" :
+                                          entry.level == .warning ? "exclamationmark.triangle" : "checkmark.circle")
+                                        .foregroundStyle(entry.level == .error ? .red : .secondary)
+                                    Text(entry.message)
+                                        .textSelection(.enabled)
+                                }
+                                .font(.caption)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id(entry.id)
+                            }
+                        }
+                    }
+                    .frame(height: 135)
+                    .onChange(of: recorder.logs.count) { _, _ in
+                        if let last = recorder.logs.last {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    }
+                }
+            }
+            Text("The editor and cinematic zooms are not yet connected to this CLT-native alpha. Video and diagnostics stay on this Mac.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .frame(width: 575)
-        .padding(24)
+        .frame(width: 620)
+        .padding(22)
     }
 }
 
-/// MainActor confines UI and start/stop transitions. The delegate only
-/// transfers plain error messages back to the main actor.
+/// Explicit observable state machine for the capture + asynchronous MP4
+/// finalization lifecycle. A successful stop request is NOT success: only
+/// the delegate's finish callback followed by AVFoundation validation is.
 @MainActor
 final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDelegate, SCStreamDelegate {
-    @Published private(set) var isRecording = false
-    @Published private(set) var isBusy = false
+    @Published private(set) var phase: CapturePhase = .ready
     @Published private(set) var status = "Ready. No screen permissions requested."
+    @Published private(set) var recordedSeconds: Double = 0
+    @Published private(set) var recordedBytes: Int64 = 0
+    @Published private(set) var finalizationElapsedSeconds: Int = 0
+    @Published private(set) var currentFilename: String?
+    @Published private(set) var lastCompletedVideo: URL?
+    @Published private(set) var logs: [CaptureLogEntry] = []
+
+    private let systemLog = Logger(subsystem: "com.daniele21.cineo.capturealpha", category: "recording")
     private var stream: SCStream?
     private var output: SCRecordingOutput?
+    private var targetURL: URL?
+    private var finalizationStarted: Date?
+    private var monitorTask: Task<Void, Never>?
+
+    override init() {
+        super.init()
+        log("Ready. Nothing is being recorded.")
+    }
 
     private var recordingsDirectory: URL {
         FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Cineo", isDirectory: true)
     }
 
+    private func log(_ message: String, level: CaptureLogEntry.Level = .info) {
+        logs.append(CaptureLogEntry(level: level, message: message))
+        if logs.count > 100 { logs.removeFirst(logs.count - 100) }
+        switch level {
+        case .info: systemLog.info("\(message, privacy: .private)")
+        case .warning: systemLog.warning("\(message, privacy: .private)")
+        case .error: systemLog.error("\(message, privacy: .private)")
+        }
+    }
+
+    private func monitor() {
+        monitorTask?.cancel()
+        monitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if let output = self.output {
+                    let seconds = CMTimeGetSeconds(output.recordedDuration)
+                    if seconds.isFinite && seconds >= 0 {
+                        self.recordedSeconds = seconds
+                    }
+                    self.recordedBytes = max(0, Int64(output.recordedFileSize))
+                }
+                if let start = self.finalizationStarted {
+                    self.finalizationElapsedSeconds = max(0, Int(Date().timeIntervalSince(start)))
+                }
+                if self.phase == .ready || self.phase == .complete || self.phase == .failed {
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+    }
+
+    private func fail(_ message: String) {
+        phase = .failed
+        status = message
+        log(message, level: .error)
+        monitorTask?.cancel()
+        monitorTask = nil
+    }
+
     func start() async {
-        guard stream == nil, !isBusy else { return }
-        isBusy = true
-        defer { isBusy = false }
+        guard stream == nil, output == nil, !phase.isWorking else { return }
+        phase = .preparing
+        status = "Checking available screens and recording permission…"
+        currentFilename = nil
+        lastCompletedVideo = nil
+        targetURL = nil
+        recordedSeconds = 0
+        recordedBytes = 0
+        finalizationElapsedSeconds = 0
+        finalizationStarted = nil
+        log("Checking Screen Recording permission and available displays.")
+        monitor()
         do {
-            // This is the first API that may trigger Screen Recording permission.
             let available = try await SCShareableContent.excludingDesktopWindows(
                 false, onScreenWindowsOnly: true
             )
             guard let display = available.displays.first(where: {
                 $0.displayID == CGMainDisplayID()
             }) ?? available.displays.first else {
-                status = "No display available. Check Screen Recording permission."
+                fail("No display found. Check Screen Recording permission in System Settings.")
                 return
             }
-            let folder = recordingsDirectory
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            log("Main display selected (\(display.width) × \(display.height)).")
+
+            try FileManager.default.createDirectory(
+                at: recordingsDirectory, withIntermediateDirectories: true
+            )
             let name = "Cineo-" + ISO8601DateFormatter().string(from: Date())
-                .replacingOccurrences(of: ":", with: "-") + ".mp4"
-            let url = folder.appendingPathComponent(name)
-            let filter = SCContentFilter(display: display, excludingWindows: [])
+                .replacingOccurrences(of: ":", with: "-") + "-" + UUID().uuidString.prefix(8) + ".mp4"
+            let url = recordingsDirectory.appendingPathComponent(String(name))
+            targetURL = url
+            currentFilename = url.lastPathComponent
+            log("Output reserved in Movies/Cineo. H.264, 30 fps, no audio.")
+
             let config = SCStreamConfiguration()
             config.width = display.width
             config.height = display.height
@@ -122,82 +331,159 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
             config.queueDepth = 5
             config.pixelFormat = kCVPixelFormatType_32BGRA
             config.showsCursor = true
-            config.capturesAudio = false  // No microphone or system-audio collection.
-            let recording = SCRecordingOutputConfiguration()
-            recording.outputURL = url
-            recording.outputFileType = .mp4
-            recording.videoCodecType = .h264
-            let activeStream = SCStream(filter: filter, configuration: config, delegate: self)
-            let activeOutput = SCRecordingOutput(configuration: recording, delegate: self)
+            config.capturesAudio = false
+
+            let recordConfig = SCRecordingOutputConfiguration()
+            recordConfig.outputURL = url
+            recordConfig.outputFileType = .mp4
+            recordConfig.videoCodecType = .h264
+
+            let activeStream = SCStream(
+                filter: SCContentFilter(display: display, excludingWindows: []),
+                configuration: config, delegate: self
+            )
+            let activeOutput = SCRecordingOutput(configuration: recordConfig, delegate: self)
             try activeStream.addRecordingOutput(activeOutput)
-            try await activeStream.startCapture()
+            // Retain objects before starting, including during asynchronous
+            // delegate callbacks or an early stream failure.
             stream = activeStream
             output = activeOutput
-            isRecording = true
-            status = "Recording to Movies/Cineo. Click Stop to finish."
+            log("Recording output attached. Starting capture…")
+            try await activeStream.startCapture()
+            if phase == .preparing {
+                phase = .recording
+                status = "Recording. Press Stop when you're finished."
+                log("Capture started. Recording metrics are live.")
+            }
         } catch {
             stream = nil
             output = nil
-            isRecording = false
-            status = "Capture failed: \(error.localizedDescription)"
+            fail("Unable to start capture: \(error.localizedDescription)")
         }
     }
 
     func stop() async {
-        guard let activeStream = stream, !isBusy else { return }
-        isBusy = true
-        defer { isBusy = false }
+        guard phase == .recording, let activeStream = stream,
+              let activeOutput = output else { return }
+        phase = .finalizing
+        finalizationStarted = Date()
+        finalizationElapsedSeconds = 0
+        status = "Stopping recording and finalizing the MP4…"
+        log("Stop requested. Asking ScreenCaptureKit to finalize output.")
+        monitor()
+
         do {
+            // Removing SCRecordingOutput is the explicit finalization route:
+            // SCRecordingOutputDelegate reports when the file is finished.
+            try activeStream.removeRecordingOutput(activeOutput)
+            log("Recording output removed. Waiting for finalization delegate.")
             try await activeStream.stopCapture()
-            // Retain delegate/output until ScreenCaptureKit confirms finalization.
             stream = nil
-            isRecording = false
-            status = "Stopped capture. Finalizing MP4…"
+            if phase == .finalizing {
+                log("Capture stream stopped. MP4 is not yet confirmed.")
+                status = "Capture stopped; waiting for MP4 finalization confirmation…"
+            }
         } catch {
-            status = "Stop failed: \(error.localizedDescription)"
+            stream = nil
+            fail("Unable to stop recording safely: \(error.localizedDescription)")
+        }
+    }
+
+    private func finish(_ id: ObjectIdentifier) async {
+        guard let activeOutput = output, ObjectIdentifier(activeOutput) == id,
+              let url = targetURL, phase != .failed else { return }
+        phase = .verifying
+        status = "ScreenCaptureKit finished. Checking the saved MP4…"
+        log("Finalization callback received. Verifying video and file integrity.")
+        monitor()
+        do {
+            let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+            let bytes = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+            guard bytes > 0 else {
+                fail("MP4 file exists but is empty. Recording was not verified.")
+                return
+            }
+            let asset = AVURLAsset(url: url)
+            let duration = CMTimeGetSeconds(try await asset.load(.duration))
+            let video = try await asset.loadTracks(withMediaType: .video)
+            guard duration.isFinite, duration > 0, !video.isEmpty else {
+                fail("MP4 was written but no playable video track was found.")
+                return
+            }
+            recordedSeconds = duration
+            recordedBytes = bytes
+            lastCompletedVideo = url
+            output = nil
+            targetURL = nil
+            finalizationStarted = nil
+            phase = .complete
+            status = "MP4 verified and ready. Choose Open MP4 or Show recordings."
+            log("Verified MP4: video track present, \(Int(duration)) seconds, \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)).")
+            monitorTask?.cancel()
+            monitorTask = nil
+        } catch {
+            fail("MP4 validation failed: \(error.localizedDescription)")
         }
     }
 
     func openRecordingsFolder() {
-        let folder = recordingsDirectory
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            NSWorkspace.shared.open(folder)
+            try FileManager.default.createDirectory(
+                at: recordingsDirectory, withIntermediateDirectories: true
+            )
+            NSWorkspace.shared.open(recordingsDirectory)
         } catch {
-            status = "Cannot open recordings folder: \(error.localizedDescription)"
+            log("Could not open recordings folder: \(error.localizedDescription)", level: .error)
         }
     }
 
+    func openLastRecording() {
+        guard let video = lastCompletedVideo, phase == .complete else { return }
+        NSWorkspace.shared.open(video)
+    }
+
+    func copyDiagnostics() {
+        let text = logs.map { line in
+            "[\(line.date.formatted(date: .omitted, time: .standard))] \(line.message)"
+        }.joined(separator: "\n")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        log("Activity log copied by user request.")
+    }
+
     nonisolated func recordingOutputDidStartRecording(_ recordingOutput: SCRecordingOutput) {
+        let id = ObjectIdentifier(recordingOutput)
         Task { @MainActor [weak self] in
-            self?.status = "Recording in progress. Video remains on this Mac."
+            guard let self, let output = self.output,
+                  ObjectIdentifier(output) == id else { return }
+            self.log("ScreenCaptureKit confirmed recording started.")
         }
     }
 
     nonisolated func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
+        let id = ObjectIdentifier(recordingOutput)
         Task { @MainActor [weak self] in
-            self?.output = nil
-            self?.status = "MP4 finalized in Movies/Cineo."
+            await self?.finish(id)
         }
     }
 
     nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: any Error) {
+        let id = ObjectIdentifier(recordingOutput)
         let message = error.localizedDescription
         Task { @MainActor [weak self] in
-            self?.status = "Recording output error: \(message)"
-            self?.isRecording = false
-            self?.stream = nil
-            self?.output = nil
+            guard let self, let output = self.output,
+                  ObjectIdentifier(output) == id else { return }
+            self.stream = nil
+            self.fail("Recording output failed: \(message)")
         }
     }
 
     nonisolated func stream(_ stream: SCStream, didStopWithError error: any Error) {
         let message = error.localizedDescription
         Task { @MainActor [weak self] in
-            self?.status = "Capture stopped unexpectedly: \(message)"
-            self?.isRecording = false
-            self?.stream = nil
-            self?.output = nil
+            guard let self else { return }
+            self.stream = nil
+            self.fail("Screen capture stopped unexpectedly: \(message)")
         }
     }
 }
