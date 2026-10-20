@@ -51,9 +51,20 @@ if [[ "$ACTION" == "--verify" ]]; then
   exit 0
 fi
 
-for command in git python3 xcodebuild; do
+for command in git python3 xcodebuild xcode-select; do
   command -v "$command" >/dev/null || { echo "Missing $command" >&2; exit 3; }
 done
+# xcodebuild is often a shim present with CommandLineTools. Fail before any
+# clone/reset/staging operation, rather than downloading Orbit needlessly.
+developer_dir="$(xcode-select -p 2>/dev/null)" || developer_dir=""
+if [[ "$developer_dir" == *"/CommandLineTools"* ]] || ! xcodebuild -version >/dev/null 2>&1; then
+  echo "Full Xcode is not selected. Current developer directory: $developer_dir" >&2
+  echo "Install/open Xcode.app, then run:" >&2
+  echo "  sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer" >&2
+  echo "  xcodebuild -version" >&2
+  echo "If DEVELOPER_DIR is set, unset/fix it too." >&2
+  exit 3
+fi
 mkdir -p "$ROOT/logs"
 if [[ ! -d "$SRC/.git" ]]; then
   git clone --filter=blob:none "$URL" "$SRC"
