@@ -72,9 +72,15 @@ interactive() {
   configure_clt
   bash scripts/build-cineo-clt.sh
   local app="${CINEO_CLT_BUILD_ROOT:-${TMPDIR:-/tmp}/cineo-clt-native}/Cineo.app"
-  open "$app"
+  [[ -x "$app/Contents/MacOS/Cineo" ]] || fail "Expected Cineo executable missing: $app"
+  # LaunchServices may otherwise activate an already-running Cineo.app
+  # from a previous build (same CFBundleIdentifier) instead of this build.
+  # -n forces a fresh process; -a selects the exact just-built bundle path.
+  echo "Launching a NEW Cineo process from: $app"
+  echo "Quit any earlier Cineo window to avoid recording with the wrong build."
+  open -n -a "$app"
   cat <<'EOF'
-Cineo Capture Alpha opened.
+Cineo Capture Alpha opened (new instance of the exact bundle above).
 1. Choose Record main display and grant permission in macOS if prompted.
 2. Move the cursor and make several clicks in non-sensitive demo content.
 3. Choose Stop. Wait for "MP4 finalized" before inspecting the file.
