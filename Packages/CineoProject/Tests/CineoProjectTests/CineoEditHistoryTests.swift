@@ -24,9 +24,11 @@ struct CineoEditHistoryTests {
         ))
         #expect(try TimelineMapper.outputDuration(for: session.current) == 6.5)
         #expect(session.canUndo)
-        #expect(session.undo())
+        let historyAction1 = session.undo()
+        #expect(historyAction1)
         #expect(session.current == original)
-        #expect(session.redo())
+        let historyAction2 = session.redo()
+        #expect(historyAction2)
         #expect(try TimelineMapper.outputDuration(for: session.current) == 6.5)
         #expect(session.current.sources == original.sources)
     }
@@ -34,13 +36,15 @@ struct CineoEditHistoryTests {
     @Test func invalidOperationNeverChangesStateOrRedo() throws {
         var session = try CineoEditHistory(project: fixture())
         try session.perform(.rename("Changed"))
-        #expect(session.undo())
+        let historyAction3 = session.undo()
+        #expect(historyAction3)
         #expect(throws: EditHistoryError.invalidIndex) {
             try session.perform(.remove(at: 99))
         }
         #expect(session.current.title == "Demo")
         #expect(session.canRedo)
-        #expect(session.redo())
+        let historyAction4 = session.redo()
+        #expect(historyAction4)
         #expect(session.current.title == "Changed")
     }
 
@@ -57,14 +61,16 @@ struct CineoEditHistoryTests {
         var session = try CineoEditHistory(project: fixture())
         try session.perform(.rename("Demo"))
         #expect(session.undoDepth == 0)
-        #expect(!session.undo())
+        let historyAction5 = !session.undo()
+        #expect(historyAction5)
     }
 
     @Test func newEditAfterUndoClearsRedo() throws {
         var session = try CineoEditHistory(project: fixture())
         try session.perform(.rename("A"))
         try session.perform(.rename("B"))
-        #expect(session.undo())
+        let historyAction6 = session.undo()
+        #expect(historyAction6)
         #expect(session.canRedo)
         try session.perform(.rename("C"))
         #expect(!session.canRedo)
@@ -77,9 +83,12 @@ struct CineoEditHistoryTests {
         try session.perform(.rename("B"))
         try session.perform(.rename("C"))
         #expect(session.undoDepth == 2)
-        #expect(session.undo())
-        #expect(session.undo())
-        #expect(!session.undo())
+        let historyAction7 = session.undo()
+        #expect(historyAction7)
+        let historyAction8 = session.undo()
+        #expect(historyAction8)
+        let historyAction9 = !session.undo()
+        #expect(historyAction9)
         #expect(session.current.title == "A")
     }
 
@@ -87,7 +96,8 @@ struct CineoEditHistoryTests {
         var session = try CineoEditHistory(project: fixture())
         try session.perform(.move(from: 1, to: 0))
         #expect(try TimelineMapper.source(at: 0, in: session.current)?.sourceTime == 15)
-        #expect(session.undo())
+        let historyAction10 = session.undo()
+        #expect(historyAction10)
         #expect(try TimelineMapper.source(at: 0, in: session.current)?.sourceTime == 0)
     }
 
