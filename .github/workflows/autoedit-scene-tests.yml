@@ -1,0 +1,41 @@
+name: Cineo Scene core + CLT renderer
+
+on:
+  pull_request:
+    paths:
+      - 'Packages/CineoScene/**'
+      - '.github/workflows/autoedit-scene-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  geometry:
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.2
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test deterministic camera and geometry
+        run: swift test --package-path Packages/CineoScene
+  macos-clt-build:
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Library/Developer/CommandLineTools
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm CLT only
+        run: |
+          test "$DEVELOPER_DIR" = /Library/Developer/CommandLineTools
+          xcrun --sdk macosx --show-sdk-path
+          swift --version
+      - name: Build actual AVFoundation/CoreImage renderer with CLT
+        run: swift build --package-path Packages/CineoScene --configuration release
+      - name: Assert headless export executable exists
+        run: |
+          bin="$(swift build --package-path Packages/CineoScene --configuration release --show-bin-path)"
+          test -x "$bin/cineo-scene-spike"
+          echo "CLT-only compositor build passed; no real MP4 output is claimed."
