@@ -108,7 +108,7 @@ Each issue has a vertical deliverable; codes can be used as issue titles and acc
 | ID | Title | Priority | Estimate | Dependencies |
 | --- | --- | --- | --- | --- |
 | [CINEO-001](https://github.com/daniele21/cineo/issues/1) | Audit native upstream builds, module maturity and licensing | P0 | L | — |
-| [CINEO-002](https://github.com/daniele21/cineo/issues/2) | Adapt starter engineering baseline to Cineo | P0 | M | — |
+| [CINEO-002](https://github.com/daniele21/cineo/issues/2) | Finish native Cineo engineering-baseline migration | P1 | M | P0 selection |
 | [CINEO-003](https://github.com/daniele21/cineo/issues/3) | Create native Cineo capture-to-file vertical slice | P1 | L | 001, 002 |
 | [CINEO-004](https://github.com/daniele21/cineo/issues/4) | Time-synchronized cursor/click sidecar | P1/P2 | M | 003 |
 | [CINEO-005](https://github.com/daniele21/cineo/issues/5) | Versioned, crash-safe project and undoable edit model | P2 | L | 003 |
