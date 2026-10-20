@@ -1,4 +1,5 @@
 import Foundation
+#if canImport(CoreImage) && canImport(CoreGraphics)
 import CoreImage
 import CoreGraphics
 
@@ -37,3 +38,5 @@ public enum CineoSceneFrameRenderer {
         return image.composited(over: background).cropped(to: canvas)
     }
 }
+
+#endif
