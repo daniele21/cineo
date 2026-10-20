@@ -58,6 +58,10 @@ struct CaptureLogEntry: Identifiable {
 private struct CaptureDashboard: View {
     @ObservedObject var recorder: CineoScreenRecorder
 
+    private var buildRevision: String {
+        Bundle.main.object(forInfoDictionaryKey: "CineoSourceCommit") as? String ?? "unknown"
+    }
+
     private var timeText: String {
         let total = Int(recorder.recordedSeconds)
         return String(format: "%02d:%02d", total / 60, total % 60)
@@ -81,6 +85,10 @@ private struct CaptureDashboard: View {
                     Text("Capture fix candidate • stream-stop finalization")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Text("SOURCE \(buildRevision) • PID \(ProcessInfo.processInfo.processIdentifier)")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
                 }
             }
             Divider()
@@ -245,6 +253,9 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
         super.init()
         log("Ready. Nothing is being recorded.")
         log("Build variant: stream-stop finalization (fix/screencapture-stop-finalization-race).")
+        let revision = Bundle.main.object(forInfoDictionaryKey: "CineoSourceCommit") as? String ?? "unknown"
+        let bundleID = Bundle.main.bundleIdentifier ?? "unknown"
+        log("Runtime identity: SOURCE=\(revision) PID=\(ProcessInfo.processInfo.processIdentifier) BUNDLE=\(bundleID)")
     }
 
     private var recordingsDirectory: URL {
