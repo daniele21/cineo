@@ -28,11 +28,43 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 2; }
 require_command() { command -v "$1" >/dev/null 2>&1 || fail "Missing command: $1"; }
 require_mac() { [[ "$(uname -s)" == Darwin ]] || fail "This test mode requires macOS."; }
 
+# macOS CommandLineTools can expose swift and xcodebuild shims even when
+# the full Xcode developer directory is not selected. Test usability,
+# not merely command presence; fail before cloning the upstream.
+require_full_xcode() {
+  require_mac
+  require_command xcode-select
+  require_command xcodebuild
+  local developer_dir
+  developer_dir="$(xcode-select -p 2>/dev/null)" || developer_dir=""
+  if [[ "$developer_dir" == *"/CommandLineTools"* ]] || ! xcodebuild -version >/dev/null 2>&1; then
+    cat >&2 <<'EOF'
+FAIL: Full Xcode is not selected (or Xcode setup is incomplete).
+Apple Command Line Tools alone cannot compile the Cineo native app and
+may not provide the Swift Testing module used by this project.
+
+1. Check installed apps: ls -d /Applications/Xcode*.app
+2. If Xcode.app exists:
+     sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+     sudo xcodebuild -license accept
+     xcodebuild -runFirstLaunch
+3. Verify: xcode-select -p && xcodebuild -version
+4. Re-run: bash scripts/test-cineo.sh --preflight
+
+If no Xcode.app exists, install full Xcode first. If a custom
+DEVELOPER_DIR is set in your shell, fix or unset that override too.
+No source files, user permissions or signing settings were modified.
+EOF
+    return 2
+  fi
+}
+
 preflight() {
   require_mac
   printf '\n== Cineo development Mac preflight ==\n'
   printf 'Architecture: '; uname -m
-  for command in swift xcodebuild python3 git; do require_command "$command"; done
+  for command in swift python3 git; do require_command "$command"; done
+  require_full_xcode
   printf 'Swift: '; swift --version | head -n 1
   xcodebuild -version
   printf 'Developer directory: '; xcode-select -p
@@ -47,6 +79,9 @@ preflight() {
 
 quick() {
   require_command swift
+  # Swift Testing ships with the supported full Xcode toolchain on macOS;
+  # do not run misleading package failures against CLT-only Swift.
+  if [[ "$(uname -s)" == Darwin ]]; then require_full_xcode; fi
   for name in CineoDirector CineoProject CineoEditPlanner; do
     printf '\n== Testing %s ==\n' "$name"
     swift test --package-path "Packages/$name"
@@ -55,8 +90,8 @@ quick() {
 }
 
 native() {
-  require_mac
-  for command in xcodebuild python3 git; do require_command "$command"; done
+  require_full_xcode
+  for command in python3 git; do require_command "$command"; done
   printf '\n== Pinned unsigned Cineo native build ==\n'
   bash scripts/bootstrap-native.sh --build
   bash scripts/native-smoke-doctor.sh --app "$APP" --allow-unsigned
@@ -77,8 +112,7 @@ native() {
 }
 
 interactive() {
-  require_mac
-  require_command xcodebuild
+  require_full_xcode
   [[ -n "${CINEO_APPLE_TEAM:-}" ]] || fail "Set CINEO_APPLE_TEAM to your Apple Development Team ID configured in Xcode."
   printf '\n== Signed Cineo developer build ==\n'
   bash scripts/bootstrap-native.sh --dev-build
@@ -115,7 +149,7 @@ inspect_export() {
 }
 
 exports() {
-  require_mac
+  require_full_xcode
   require_command swift
   local landscape="" portrait="" audio=false
   while (( $# > 0 )); do
