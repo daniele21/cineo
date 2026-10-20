@@ -1,0 +1,36 @@
+name: CLT-only macOS SwiftUI proof
+
+on:
+  pull_request:
+    paths:
+      - 'Examples/CineoCLTProof/**'
+      - 'scripts/build-clt-proof.sh'
+      - '.github/workflows/clt-only-proof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clt-compile:
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Library/Developer/CommandLineTools
+      CINEO_CLT_PROOF_OUTPUT: ${{ github.workspace }}/.clt-proof
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify CLT-only environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d /Library/Developer/CommandLineTools
+          test "$(xcode-select -p)" = "/Library/Developer/CommandLineTools"
+          swift --version
+          xcrun --sdk macosx --show-sdk-path
+      - name: Build .app with Swift Package Manager (never xcodebuild)
+        run: bash scripts/build-clt-proof.sh
+      - name: Verify ad-hoc signed bundle
+        run: |
+          test -x "$CINEO_CLT_PROOF_OUTPUT/CineoCLTProof.app/Contents/MacOS/CineoCLTProof"
+          codesign --verify --strict "$CINEO_CLT_PROOF_OUTPUT/CineoCLTProof.app"
