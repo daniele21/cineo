@@ -1,0 +1,45 @@
+name: Cineo native app CLT-only build
+
+on:
+  pull_request:
+    paths:
+      - 'Apps/Cineo/**'
+      - 'scripts/build-cineo-clt.sh'
+      - '.github/workflows/clt-native-cineo.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Apps/Cineo/**'
+      - 'scripts/build-cineo-clt.sh'
+      - '.github/workflows/clt-native-cineo.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-native:
+    name: SwiftPM Cineo app and ad-hoc signing (no Xcode)
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Library/Developer/CommandLineTools
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify real CLT environment
+        run: |
+          set -euo pipefail
+          test "$(xcode-select -p)" = /Library/Developer/CommandLineTools
+          xcrun --sdk macosx --show-sdk-path
+          swift --version
+          bash -n scripts/build-cineo-clt.sh
+      - name: Compile and package real screen recorder
+        env:
+          CINEO_CLT_BUILD_ROOT: ${{ runner.temp }}/cineo-capture
+        run: |
+          set -euo pipefail
+          bash scripts/build-cineo-clt.sh
+          test -x "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/MacOS/Cineo"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/Info.plist")" = com.daniele21.cineo.capturealpha
+          codesign --verify --strict "$CINEO_CLT_BUILD_ROOT/Cineo.app"
+          echo "Native Cineo app packaged under standalone CLT."
