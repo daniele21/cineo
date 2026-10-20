@@ -256,6 +256,7 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
         let revision = Bundle.main.object(forInfoDictionaryKey: "CineoSourceCommit") as? String ?? "unknown"
         let bundleID = Bundle.main.bundleIdentifier ?? "unknown"
         log("Runtime identity: SOURCE=\(revision) PID=\(ProcessInfo.processInfo.processIdentifier) BUNDLE=\(bundleID)")
+        log("Running app location: \(Bundle.main.bundleURL.path)")
     }
 
     private var recordingsDirectory: URL {
