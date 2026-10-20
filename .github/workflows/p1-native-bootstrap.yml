@@ -42,6 +42,16 @@ jobs:
           bash scripts/bootstrap-native.sh --plan
       - name: Compile isolated Cineo bundle
         run: bash scripts/bootstrap-native.sh --build
+      - name: Native bridge tests with synthetic telemetry (no screen permissions)
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild -project "$CINEO_NATIVE_ROOT/orbit/Reco.xcodeproj" \
+            -scheme Reco -configuration Debug -destination 'platform=macOS' \
+            -derivedDataPath "$CINEO_NATIVE_ROOT/DerivedData" \
+            -parallel-testing-enabled NO -only-testing:RecoTests/CineoAutoZoomBridgeTests \
+            CODE_SIGNING_ALLOWED=NO test \
+            2>&1 | tee "$CINEO_NATIVE_ROOT/logs/cineo-bridge-tests.log"
       - name: Check compiled bundle metadata (not capture)
         run: |
           bash -n scripts/native-smoke-doctor.sh
