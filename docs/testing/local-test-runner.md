@@ -50,7 +50,7 @@ La modalità `--exports` richiede esplicitamente 1920×1080 per il video landsca
 
 La Capture Alpha ora presenta un **pannello di stato** con fasi distinte: *Preparing → Recording → Finalizing MP4 → Verifying MP4 → Saved* (oppure *Error*). Sia il tempo registrato sia i byte scritti sono letti dalle proprietà effettive di `SCRecordingOutput`, non simulati. Durante la finalizzazione viene mostrato **il tempo trascorso**, insieme a uno spinner: ScreenCaptureKit non espone una percentuale affidabile del tempo rimanente.
 
-Apri **Activity log** sotto lo stato per consultare tutti gli eventi con orario: individuazione dello schermo, preparazione file, avvio cattura, richiesta stop, chiusura dell'output, callback finale e validazione del file con AVFoundation. Il pulsante **Copy diagnostics** copia gli eventi sul Mac soltanto se lo richiedi. Dopo un MP4 verificato compare **Open MP4**. Anche in caso di lunga attesa l'app non elimina automaticamente il file sorgente.
+Consulta il riquadro **Activity log**, sempre visibile sotto lo stato, per tutti gli eventi con orario: individuazione dello schermo, preparazione file, avvio cattura, richiesta stop, chiusura dell'output, callback finale e validazione del file con AVFoundation. Il pulsante **Copy diagnostics** copia gli eventi sul Mac soltanto se lo richiedi. Dopo un MP4 verificato compare **Open MP4**. Anche in caso di lunga attesa l'app non elimina automaticamente il file sorgente.
 
 Se resta su *Finalizing MP4*, annota le ultime tre righe dell'Activity log e il tempo trascorso. Non considerare mai un semplice stop del flusso come prova del file pronto: l'interfaccia passa a *Saved* soltanto dopo callback e verifica di durata/traccia video. L'app non trasmette né registrazioni né diagnostica nel cloud.
 
