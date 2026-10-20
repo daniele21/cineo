@@ -103,7 +103,9 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
             let available = try await SCShareableContent.excludingDesktopWindows(
                 false, onScreenWindowsOnly: true
             )
-            guard let display = available.displays.first else {
+            guard let display = available.displays.first(where: {
+                $0.displayID == CGMainDisplayID()
+            }) ?? available.displays.first else {
                 status = "No display available. Check Screen Recording permission."
                 return
             }
