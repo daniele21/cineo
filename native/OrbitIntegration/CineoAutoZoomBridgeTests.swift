@@ -35,7 +35,7 @@ struct CineoAutoZoomBridgeTests {
         #expect(segments.first?.isAutomatic == true)
         #expect(segments.first?.scale == 1.4)
         #expect(segments.first?.range.lowerBound == 1.65)
-        #expect(segments.first?.range.upperBound == 3.4)
+        #expect(abs((segments.first?.range.upperBound ?? 0) - 3.4) < 0.000001)
         guard case .fixed(let center)? = segments.first?.focus else {
             Issue.record("Cineo expected editable fixed camera focus")
             return
