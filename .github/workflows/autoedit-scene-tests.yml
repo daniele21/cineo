@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'Packages/CineoScene/**'
+      - 'scripts/test-cineo-autoedit-render.sh'
       - '.github/workflows/autoedit-scene-tests.yml'
   workflow_dispatch:
 
@@ -18,6 +19,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Syntax-check physical-Mac regression command
+        run: bash -n scripts/test-cineo-autoedit-render.sh
       - name: Test deterministic camera and geometry
         run: swift test --package-path Packages/CineoScene
   macos-clt-build:
