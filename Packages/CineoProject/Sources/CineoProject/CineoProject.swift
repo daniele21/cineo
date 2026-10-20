@@ -146,10 +146,10 @@ public struct CineoProjectStore: Sendable {
         try project.validate()
         guard directory.pathExtension == "cineo" else { throw ProjectError.invalidPackageLocation }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(
-            at: directory.appendingPathComponent("Media", isDirectory: true),
-            withIntermediateDirectories: true
-        )
+        let media = try safeMediaDirectory(in: directory, create: true)
+        for source in project.sources {
+            _ = try safeSourceURL(source.relativePath, in: directory, media: media)
+        }
         let data = try JSONEncoder().encode(project)
         // .atomic writes a temporary file and renames on success.
         try data.write(to: directory.appendingPathComponent("manifest.json"), options: .atomic)
@@ -160,6 +160,10 @@ public struct CineoProjectStore: Sendable {
         let data = try Data(contentsOf: directory.appendingPathComponent("manifest.json"))
         let project = try JSONDecoder().decode(CineoManifest.self, from: data)
         try project.validate()
+        let media = try safeMediaDirectory(in: directory, create: false)
+        for source in project.sources {
+            _ = try safeSourceURL(source.relativePath, in: directory, media: media)
+        }
         return project
     }
 
@@ -171,13 +175,41 @@ public struct CineoProjectStore: Sendable {
               !filename.isEmpty, !filename.contains("/"), !filename.contains("\\"),
               filename != ".", filename != "..", !filename.hasPrefix(".")
         else { throw ProjectError.invalidSource }
-        let media = directory.appendingPathComponent("Media", isDirectory: true)
-        try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
+        let media = try safeMediaDirectory(in: directory, create: true)
         let destination = media.appendingPathComponent(filename)
-        guard !FileManager.default.fileExists(atPath: destination.path) else {
-            throw ProjectError.invalidSource
-        }
+        guard !FileManager.default.fileExists(atPath: destination.path),
+              !((try? destination.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink ?? false),
+              !((try? original.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink ?? false)
+        else { throw ProjectError.invalidSource }
         try FileManager.default.copyItem(at: original, to: destination)
         return destination
+    }
+
+    /// Protect against externally created symlinked Media folders. Merely
+    /// checking a manifest for '..' is not sufficient to prevent traversal.
+    private func safeMediaDirectory(in root: URL, create: Bool) throws -> URL {
+        guard root.pathExtension == "cineo" else { throw ProjectError.invalidPackageLocation }
+        let media = root.appendingPathComponent("Media", isDirectory: true)
+        if create {
+            try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
+        }
+        let canonicalRoot = root.resolvingSymlinksInPath().standardizedFileURL
+        let expected = canonicalRoot.appendingPathComponent("Media", isDirectory: true)
+        guard media.resolvingSymlinksInPath().standardizedFileURL == expected,
+              !((try? media.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink ?? false)
+        else { throw ProjectError.invalidSource }
+        return media
+    }
+
+    /// Symlinks inside Media must also stay within its canonical root.
+    /// A missing source is kept as a valid *reference* so the editor can
+    /// report a relinkable missing-media state instead of discarding edits.
+    private func safeSourceURL(_ path: String, in root: URL, media: URL) throws -> URL {
+        guard CineoManifest.validRelativeMediaPath(path) else { throw ProjectError.invalidSource }
+        let url = root.appendingPathComponent(path)
+        let resolved = url.resolvingSymlinksInPath().standardizedFileURL.path
+        let rootPath = media.resolvingSymlinksInPath().standardizedFileURL.path
+        guard resolved.hasPrefix(rootPath + "/") else { throw ProjectError.invalidSource }
+        return url
     }
 }
