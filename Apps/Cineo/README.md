@@ -171,3 +171,21 @@ Open a supported MP4 or `.cineo` video and edit zoom/focus as usual. In Cineo St
 The equivalent export writes `camera.keyframe` actions because arbitrary hand-authored keyframes cannot be reliably compressed back to one semantic `camera.zoom` shot. Each keyframe uses the same `time`, `target.x/y`, and `scale` as the underlying `CineoScenePlan`; the exporter recompiles its own JSON and refuses to show a recipe if the scene differs. `camera.zoom` remains the simpler way to author complete in–hold–out motion. Imported markers are cleared after manual camera changes to avoid stale action labels; the actual keyframes remain fully editable.
 
 See [`docs/automation/cineo-actions-v1.md`](../../docs/automation/cineo-actions-v1.md). This candidate requires GitHub CLT CI and real Mac visual tests. The sheet describes snapshot frames and not animated Play/Pausa yet.
+
+
+## Pre-export live preview and precise frame scrubbing (candidate PR #56)
+
+Open an MP4 or `.cineo` in Cineo Studio, then use **Play / Pausa** next to the timeline. Cineo uses `AVPlayerItemVideoOutput` to decode actual source frames and evaluates every displayed frame with **the same `CineoSceneFrameRenderer.compose` used by final export**. The editor presents a bounded 960px-wide proxy of the canonical 1920×1080 (or 1080×1920) composition to reduce GPU cost. It never hides the original source or creates a temporary final MP4 merely for preview.
+
+- The time indicator follows the video's actual playback clock and skips decoded frames when the device cannot render every frame; no fake smoothness or fabricated frame count. **Anteprima: N fps visualizzati** shows the number of frames actually presented each second.
+- **‹ Frame** and **Frame ›** step by one source frame using the recording's nominal frame rate (default 30fps if unavailable). Manual dragging still displays correctly composited frames, with a shorter 35ms request-coalescing window and reused GPU context/image generator.
+- Scrubbing or changing the camera pauses playback; export pauses playback too. Playback audio is intentionally muted because the current Cineo Capture Alpha does not record system audio. Source recordings are never modified.
+- **Known limitations:** playable previews are provisional until measured on a real Mac. The preview may drop frames on large/high-rate footage and therefore is not promised at native 30/60fps. Frame stepping is approximate for variable-frame-rate sources. Rendered proxy frames use the same geometry and easing but lower raster resolution; exact output still needs MP4 quality checking. Only supported single-video, identity-transform sources are opened at present.
+
+A suggested G1 verification on the physical Mac: import a 25s MP4, create 2 manual or JSON zooms, click **Play**, check visible zoom-in/hold/out without exporting, pause, step through 5 frames, switch 16:9→9:16, resume, export and compare representative timestamps. Verify after editing the original source hash is identical.
+
+## Brand Kit v1.0 (supplied 2026-10-20)
+
+The native capture/editor headers now use the **Cursor Zoom** layered mark, the ocean accent (`#107C99`), accessible native text and optional Inter only when already installed. The official supplied app icon and PNGs are embedded as signed bundle resources by `scripts/build-cineo-clt.sh`. **No runtime downloads or full Xcode.app are required**, and user video exports are **not automatically watermarked** with Cineo branding.
+
+Asset source and provenance: [Assets/Brand/README.md](../../Assets/Brand/README.md). The phrase "Il focus su ciò che conta." is provisional source-kit copy and should be approved before commercial publication.
