@@ -379,7 +379,10 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
 
     func stop() async {
         guard phase == .recording, let activeStream = stream,
-              output != nil else { return }
+              let activeOutput = output else { return }
+        let durationAtStop = CMTimeGetSeconds(activeOutput.recordedDuration)
+        let bytesAtStop = activeOutput.recordedFileSize
+        log("Recording state before Stop: duration=\(durationAtStop.isFinite ? String(format: "%.2f", durationAtStop) : "invalid")s, bytes=\(bytesAtStop).")
         phase = .finalizing
         finalizationStarted = Date()
         finalizationElapsedSeconds = 0
