@@ -5,14 +5,26 @@ import CoreMedia
 import CoreVideo
 import AppKit
 import OSLog
+import UniformTypeIdentifiers
 
 @main
 struct CineoApp: App {
     @StateObject private var recorder = CineoScreenRecorder()
+    @StateObject private var editor = CineoEditorModel()
 
     var body: some Scene {
         WindowGroup("Cineo") {
-            CaptureDashboard(recorder: recorder)
+            Group {
+                if editor.sourceURL != nil {
+                    CineoManualEditorView(editor: editor) {
+                        editor.close()
+                    }
+                } else {
+                    CaptureDashboard(recorder: recorder) { url in
+                        Task { await editor.open(url) }
+                    }
+                }
+            }
         }
         .windowResizability(.contentSize)
     }
@@ -57,6 +69,7 @@ struct CaptureLogEntry: Identifiable {
 
 private struct CaptureDashboard: View {
     @ObservedObject var recorder: CineoScreenRecorder
+    let onEditVideo: (URL) -> Void
 
     private var buildRevision: String {
         Bundle.main.object(forInfoDictionaryKey: "CineoSourceCommit") as? String ?? "unknown"
@@ -124,6 +137,26 @@ private struct CaptureDashboard: View {
                         Label("Open MP4", systemImage: "play.rectangle")
                     }
                     .help(url.lastPathComponent)
+                }
+                if let url = recorder.lastCompletedVideo, recorder.phase == .complete {
+                    Button {
+                        onEditVideo(url)
+                    } label: {
+                        Label("Apri editor", systemImage: "slider.horizontal.3")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .help("Modifica inquadratura, zoom e sfondi; il video originale resta invariato.")
+                }
+                Button {
+                    let panel = NSOpenPanel()
+                    panel.canChooseDirectories = false
+                    panel.allowsMultipleSelection = false
+                    panel.allowedContentTypes = [.mpeg4Movie, .movie]
+                    if panel.runModal() == .OK, let url = panel.url {
+                        onEditVideo(url)
+                    }
+                } label: {
+                    Label("Modifica MP4…", systemImage: "film")
                 }
             }
 
@@ -219,7 +252,7 @@ private struct CaptureDashboard: View {
                     }
                 }
             }
-            Text("The editor and cinematic zooms are not yet connected to this CLT-native alpha. Video and diagnostics stay on this Mac.")
+            Text("Manual and assisted editor preview is available from Apri editor / Modifica MP4. Click-based automatic recognition is not yet available. Everything stays local.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
