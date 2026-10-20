@@ -4,6 +4,14 @@
 **Research date:** 2026-10-19.  
 **Evidence classification:** public README = upstream claim; source audit = implementation evidence; local build + test/export artifact = validated for Cineo.
 
+## Updated reference study — 2026-10-20
+
+The original upstream shortlist has been expanded by a **source-level audit of 13+ repositories**, including mature continued [OpenScreen](https://github.com/getopenscreen/openscreen), headless `screenstudio-alt`, Auto-Editor, Cap, Recordly, Palmier Pro, Editly, Revideo and Remotion. See the [pinned-commit Auto Edit research and adoption matrix](research/auto-edit-upstream-2026-10.md), [parallel delivery plan](plans/auto-edit-parallel-delivery.md), and [CLT-only renderer experiment #48](https://github.com/daniele21/cineo/issues/48).
+
+**Updated technical judgement:** Orbit's precomputed immutable `RenderPlan`/Core Image `FrameRenderer` is the strongest code-level reference for the current **SwiftPM/CLT-only** app, but the old benchmark built Orbit with **Xcode**, not CLT. CineScreen provides an elegant shared Metal GPU renderer; its `.metal` shader compilation may be impossible with standalone CLT, so use it only as a separate feasibility spike. OpenScreen offers an active MIT editor/CLI reference and uses the **same export pipeline for UI and CLI**, although it boots a hidden Electron renderer and is not a native Swift module. ArcShot is technically useful but its special license forbids App Store derivatives; Recordly/Cap are mostly AGPL and Palmier GPL. See the research table for exact licenses and file-level sources.
+
+The user-provided 25-second final MP4 is evidence the new standalone Cineo ScreenCaptureKit recorder can finalize **one** session. It is **not** evidence that the older Orbit Xcode editor, its compositor, or any automatic/assisted post-production is integrated or validated. Preserve the distinction between prior Xcode-native prototype and current CLT-only app.
+
 ## Guardrail
 
 **Do not mix repos by copying components opportunistically.** Select one primary native app foundation, preserve upstream attribution, and import additional code only when license, integration boundaries, upkeep and tests are documented. Use other repos freely as conceptual references; never treat a public GitHub project as automatically unrestricted.
