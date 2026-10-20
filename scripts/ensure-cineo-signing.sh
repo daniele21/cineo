@@ -124,6 +124,9 @@ EOF
     is_sha1 "$sha" || { echo "Unable to read signing certificate fingerprint." >&2; exit 2; }
     security import "$tmp/identity.p12" -k "$KEYCHAIN" -P "$p12_password" -T /usr/bin/codesign >&2
     unset p12_password
+    # Pin immediately once imported. If trust adjustment fails, a later build
+    # must NOT generate a fresh identity and invalidate the original grant.
+    store_pin "$sha"
     # Local user trust for code-signing validation (NOT Developer ID / Gatekeeper).
     # Some macOS versions need explicit user trust for a self-signed identity
     # to appear under 'security find-identity -v -p codesigning'.
