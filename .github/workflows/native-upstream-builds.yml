@@ -24,8 +24,6 @@ jobs:
       fail-fast: false
       matrix:
         candidate: [orbit, cinescreen, bettercapture]
-    env:
-      CINEO_BENCH_ROOT: ${{ runner.temp }}/cineo-upstream-bench
     steps:
       - name: Checkout Cineo harness
         uses: actions/checkout@v4
@@ -45,6 +43,8 @@ jobs:
 
       - name: Build selected pinned native upstream
         shell: bash
+        env:
+          CINEO_BENCH_ROOT: ${{ runner.temp }}/cineo-upstream-bench
         run: bash scripts/benchmark-upstreams.sh --run "${{ matrix.candidate }}"
 
       - name: Upload build logs when available
@@ -52,6 +52,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: p0-${{ matrix.candidate }}-build-logs
-          path: ${{ env.CINEO_BENCH_ROOT }}/logs
+          path: ${{ runner.temp }}/cineo-upstream-bench/logs
           if-no-files-found: ignore
           retention-days: 7
