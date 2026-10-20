@@ -1,0 +1,48 @@
+name: Cineo P1 native bootstrap
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/bootstrap-native.sh'
+      - 'scripts/cineo_native_overlay.py'
+      - '.github/workflows/p1-native-bootstrap.yml'
+      - 'docs/decisions/**'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/bootstrap-native.sh'
+      - 'scripts/cineo_native_overlay.py'
+      - '.github/workflows/p1-native-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-bootstrap:
+    name: P1 Cineo named bundle compile
+    runs-on: macos-26
+    timeout-minutes: 55
+    env:
+      CINEO_NATIVE_ROOT: ${{ github.workspace }}/.cineo-build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Environment and static checks
+        run: |
+          uname -a
+          xcodebuild -version
+          bash -n scripts/bootstrap-native.sh
+          python3 -m py_compile scripts/cineo_native_overlay.py
+          bash scripts/bootstrap-native.sh --plan
+      - name: Compile isolated Cineo bundle
+        run: bash scripts/bootstrap-native.sh --build
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-cineo-native-build-evidence
+          path: |
+            .cineo-build/logs/
+            .cineo-build/UPSTREAM-ORBIT-LICENSE.txt
+          retention-days: 7
+          if-no-files-found: warn
