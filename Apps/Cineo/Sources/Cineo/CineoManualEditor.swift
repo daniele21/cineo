@@ -861,7 +861,12 @@ private struct CineoInstructionsDialog: View {
                     Button("Copia esempio zoom") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(exampleZoom, forType: .string)
-                        feedback = "Esempio copiato. Salvalo come .json e importalo in Studio."
+                        feedback = "Esempio zoom copiato. Salvalo come .json e importalo in Studio."
+                    }
+                    Button("Copia esempio keyframe") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(exampleKeyframe, forType: .string)
+                        feedback = "Esempio keyframe copiato. Salvalo come .json e importalo in Studio."
                     }
                 }
             }
