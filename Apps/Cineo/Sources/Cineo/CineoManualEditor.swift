@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import AVFoundation
 import AppKit
+import UniformTypeIdentifiers
 import CoreImage
 import CineoScene
 import CineoProject
@@ -36,6 +37,12 @@ final class CineoEditorModel: ObservableObject {
     @Published var exportProgress: Double = 0
     @Published var outputURL: URL?
     @Published var keyframes: [CineoCameraKeyframe] = []
+    @Published private(set) var importedActionMarkers: [ImportedActionMarker] = []
+
+    struct ImportedActionMarker: Identifiable {
+        let id: String
+        let at: Double
+    }
 
     private var previewTask: Task<Void, Never>?
     private var previewRequest = UUID()
@@ -106,6 +113,7 @@ final class CineoEditorModel: ObservableObject {
             portrait = false
             style = "Dark"
             keyframes = []
+            importedActionMarkers = []
             title = openedProject?.title ?? url.lastPathComponent
             sourceURL = mediaURL
             projectURL = openedProject == nil ? nil : url
@@ -156,6 +164,63 @@ final class CineoEditorModel: ObservableObject {
                 status = "Salvataggio progetto fallito: \(error.localizedDescription). Il video originale è intatto."
             }
             isSavingProject = false
+        }
+    }
+
+    /// Validate the whole input before changing editor state. The final
+    /// scene is evaluated by the exact same compositor used by MP4 export.
+    func importInstructions(from url: URL) {
+        guard sourceURL != nil, !isExporting, !isSavingProject else { return }
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            let length = (attributes[.size] as? NSNumber)?.intValue ?? -1
+            guard length > 0, length <= 1_048_576 else {
+                throw CineoInstructionError.invalid("Il file JSON deve occupare al massimo 1 MB.")
+            }
+            let document = try CineoInstructionDocument.decode(
+                Data(contentsOf: url, options: .mappedIfSafe)
+            )
+            let compiled = try document.compile(duration: duration, over: currentPlan)
+
+            if !keyframes.isEmpty {
+                let alert = NSAlert()
+                alert.messageText = "Sostituire gli zoom attuali?"
+                alert.informativeText = "Le azioni importate sostituiranno i keyframe esistenti. " +
+                    "La registrazione originale non verrà modificata."
+                alert.addButton(withTitle: "Importa e sostituisci")
+                alert.addButton(withTitle: "Annulla")
+                guard alert.runModal() == .alertFirstButtonReturn else {
+                    status = "Importazione annullata; montaggio invariato."
+                    return
+                }
+            }
+
+            let previous = currentPlan
+            keyframes = compiled.camera
+            portrait = compiled.outputHeight > compiled.outputWidth
+            padding = compiled.paddingFraction
+            if compiled.background.red < 0.04 { style = "Black" }
+            else if compiled.background.red > 0.5 { style = "Light" }
+            else { style = "Dark" }
+
+            guard savePlan() else {
+                keyframes = previous.camera
+                portrait = previous.outputHeight > previous.outputWidth
+                padding = previous.paddingFraction
+                if previous.background.red < 0.04 { style = "Black" }
+                else if previous.background.red > 0.5 { style = "Light" }
+                else { style = "Dark" }
+                return
+            }
+            importedActionMarkers = document.actions.map {
+                ImportedActionMarker(id: $0.id, at: $0.start + $0.transition.in)
+            }
+            let focusMoment = importedActionMarkers.first?.at ?? selectedTime
+            scrub(focusMoment)
+            status = "Applicate \(document.actions.count) azioni da \(url.lastPathComponent). " +
+                "Sono ora keyframe modificabili, visibili nella timeline e nell'anteprima."
+        } catch {
+            status = "Istruzioni non applicate: \(error.localizedDescription)"
         }
     }
 
@@ -260,6 +325,7 @@ final class CineoEditorModel: ObservableObject {
 
     func resetCamera() {
         keyframes = []
+        importedActionMarkers = []
         zoom = 1; focusX = 0.5; focusY = 0.5
         savePlan()
         status = "Zoom rimossi. La composizione originale rimane disponibile."
@@ -468,6 +534,18 @@ struct CineoManualEditorView: View {
                         .foregroundStyle(.secondary)
                         .font(.caption)
                 }
+                Button("Importa istruzioni…") {
+                    let panel = NSOpenPanel()
+                    panel.canChooseDirectories = false
+                    panel.allowsMultipleSelection = false
+                    panel.allowedContentTypes = [.json]
+                    panel.message = "Seleziona un file Cineo Actions JSON v1"
+                    if panel.runModal() == .OK, let url = panel.url {
+                        editor.importInstructions(from: url)
+                    }
+                }
+                .disabled(editor.isExporting || editor.isSavingProject || editor.sourceURL == nil)
+                .help("Importa azioni camera.zoom e stile da un file JSON versionato.")
                 if editor.isSavingProject { ProgressView().controlSize(.small) }
             }
             HStack(alignment: .top, spacing: 18) {
@@ -520,6 +598,20 @@ struct CineoManualEditorView: View {
                     }
                     Text("Seleziona un momento nella timeline, poi clicca sull'anteprima per scegliere il punto d'interesse.")
                         .font(.caption).foregroundStyle(.secondary)
+                    if !editor.importedActionMarkers.isEmpty {
+                        ScrollView(.horizontal) {
+                            HStack(spacing: 6) {
+                                Text("Azioni importate")
+                                    .font(.caption.weight(.semibold))
+                                ForEach(editor.importedActionMarkers) { action in
+                                    Button(action.id) { editor.scrub(action.at) }
+                                        .buttonStyle(.bordered)
+                                        .font(.caption)
+                                        .help(String(format: "Vai al focus a %.2f s", action.at))
+                                }
+                            }
+                        }
+                    }
                     if !editor.keyframes.isEmpty {
                         ScrollView(.horizontal) {
                             HStack(spacing: 6) {
