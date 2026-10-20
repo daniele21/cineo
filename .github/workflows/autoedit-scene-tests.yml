@@ -38,4 +38,6 @@ jobs:
         run: |
           bin="$(swift build --package-path Packages/CineoScene --configuration release --show-bin-path)"
           test -x "$bin/cineo-scene-spike"
-          echo "CLT-only compositor build passed; no real MP4 output is claimed."
+          echo "CLT-only compositor compiled; running real frame-export smoke next."
+      - name: Generate test clip and verify real local H264 re-render
+        run: swift run --package-path Packages/CineoScene --configuration release cineo-scene-smoke
