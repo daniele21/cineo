@@ -27,7 +27,7 @@ When generic inherited contracts conflict with product-specific requirements, pr
 
 ## Upstream reuse and licenses
 
-- **Candidate**, not committed base: diip3sh/orbit.
+- **Conditional P1 staging base**: diip3sh/orbit at pinned SHA `219c4c8ad9965229aa84271c5201b1b8ad26eb7a`, per `docs/decisions/0001-native-foundation.md`. Real signed capture and export validation are still blocked.
 - Other evaluation references: jsattler/BetterCapture, jasonzh0/CineScreen, getopenscreen/openscreen.
 - Do not copy ArcShot or AGPL-derived source just because it is readable; read exact source license/dependencies/asset notices and evaluate distribution consequences.
 - Maintain provenance ledger (upstream, SHA, original path, license, copyright, changes, tests) before every imported source module.
@@ -41,13 +41,12 @@ When generic inherited contracts conflict with product-specific requirements, pr
 - At **release**, verify all quality gates including real-Mac capture, signing/notarization, permission behaviour, privacy and source preservation.
 - Use Mac Apple Silicon runner for Xcode workflows when configured. Do not invent green CI evidence or assert that local builds were run without actual output.
 
-## Initial task (P0)
+## Current gate: P1, with P2/P3 independent package spikes
 
-1. Inventory Cineo files and inherited template checks; replace or configure template-specific entrypoints carefully.
-2. Pin and inspect concrete upstream commits; verify license texts, code maturity and build commands.
-3. Perform reproducible native benchmarks for Orbit, CineScreen and BetterCapture on equal fixtures.
-4. Select a single coherent source/project/render architecture and write a decision record.
-5. Only then begin implementing native Cineo and moving inherited template scaffolding aside.
+1. Verify the pinned Orbit-to-Cineo bootstrap compiles and the unsigned metadata checks pass.
+2. On a signed physical Mac complete `docs/testing/native-smoke.md` for TCC, capture, audio, editor and export before declaring native app features working.
+3. Independently improve pure Swift `CineoDirector` and `CineoProject` logic with tests; do not claim these are wired into the native app.
+4. Keep inherited template validation marked as legacy engineering checks rather than app-level E2E.
 
 ## What does not count as done
 
