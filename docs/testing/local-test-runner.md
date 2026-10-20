@@ -18,7 +18,7 @@ bash scripts/test-cineo.sh --interactive
 | Comando | Cosa fa | Evidenza |
 | --- | --- | --- |
 | `--preflight` | Controlla l'SDK CLT, Swift e la presenza del framework Testing | Diagnostica senza Xcode |
-| `--quick` | Esegue le suite `CineoDirector`, `CineoProject` e `CineoEditPlanner` con search path CLT per Swift Testing | Test unitari senza Xcode |
+| `--quick` | Su macOS esegue uno **smoke test eseguibile** di Camera Director, Project, Edit Planner e Undo/Redo senza macro Swift Testing; su Linux esegue le suite complete | Test unitari senza Xcode |
 | `--native` | Compila `Apps/Cineo` con SwiftPM, crea `Cineo.app` e la firma ad hoc | Build nativa senza `xcodebuild` |
 | `--interactive` | Ricompila la stessa app e la apre | **Test manuale** Screen Recording e MP4 |
 | `--exports` | Ispeziona un MP4 H.264 già esportato con AVFoundation | Codec/risoluzione/durata, non qualità percepita |
@@ -48,10 +48,10 @@ La modalità `--exports` richiede esplicitamente 1920×1080 per il video landsca
 
 ## Swift Testing con CLT
 
-Su alcune installazioni di Command Line Tools SwiftPM non trova `Testing.framework` e il comando `swift test` fallisce con `no such module 'Testing'`. `scripts/swift-test-clt.sh` rileva il framework installato nei CLT e configura percorsi `-F` e `-rpath` per compilazione ed esecuzione senza Xcode. Questa soluzione richiede comunque un CLT installato correttamente.
+Su alcune installazioni di Command Line Tools SwiftPM non trova `Testing.framework` e il comando `swift test` fallisce con `no such module 'Testing'`. Il wrapper sperimentale `scripts/swift-test-clt.sh` rileva il framework e aggiunge i percorsi `-F` e `-rpath`, ma alcune versioni CLT non includono il **plugin `TestingMacros`**, necessario ai test con `@Test`. Per evitare di dipendere da Xcode, la modalità macOS `--quick` esegue per ora il programma `Apps/CineoCLTSmoke` con asserzioni vere e codice condiviso, senza `import Testing`. I test completi rimangono eseguiti in CI Linux; questo smoke non li sostituisce integralmente. La soluzione definitiva per le macro Swift Testing su CLT è ancora aperta.
 
 ## Stato di verifica
 
-La CI macOS può verificare **compilazione**, firme ad hoc e test Swift isolati con `DEVELOPER_DIR=/Library/Developer/CommandLineTools`. Non verifica permessi TCC, acquisizione reale, validità effettiva di un file prodotto dall'app o qualità video. Sono i test manuali da eseguire sul Mac fisico.
+La CI macOS può verificare **compilazione**, firme ad hoc e uno smoke test degli algoritmi Swift senza macro con `DEVELOPER_DIR=/Library/Developer/CommandLineTools`. Non verifica permessi TCC, acquisizione reale, validità effettiva di un file prodotto dall'app o qualità video. Sono i test manuali da eseguire sul Mac fisico.
 
 Vedi [decisione CLT-only](../decisions/0002-xcode-free-build.md) e [test prodotto completo](native-smoke.md).
