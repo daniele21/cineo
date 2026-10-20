@@ -1,0 +1,30 @@
+name: Cineo headless CLI contract
+
+on:
+  pull_request:
+    paths:
+      - 'Tools/CineoCLI/**'
+      - '.github/workflows/autoedit-cli-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cli:
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.2
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile standalone Cineo Swift CLI
+        run: swift build --package-path Tools/CineoCLI --configuration release
+      - name: Invalid inputs must return nonzero
+        run: |
+          set -eu
+          bin="$(swift build --package-path Tools/CineoCLI --configuration release --show-bin-path)/cineo"
+          if "$bin" plan; then
+            echo "ERROR: malformed CLI accepted"
+            exit 1
+          fi
