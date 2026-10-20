@@ -30,15 +30,20 @@ public struct CineoAutoEditView: View {
     public let onExport: () -> Void
     public let onChangeAcceptance: (UUID, Bool) -> Void
 
-    @State private var mode: Mode = .assisted
-    @State private var acceptedIDs: Set<UUID> = []
+    // CLT-only builds do not ship the SwiftUI.State macro implementation.
+    // The hosting app owns state; this component uses plain Binding values.
+    public let mode: Binding<Mode>
+    public let acceptedIDs: Binding<Set<UUID>>
 
     public init(filename: String, proposals: [Proposal],
+                mode: Binding<Mode>, acceptedIDs: Binding<Set<UUID>>,
                 exportAvailable: Bool, progress: Double? = nil,
                 onExport: @escaping () -> Void,
                 onChangeAcceptance: @escaping (UUID, Bool) -> Void) {
         self.filename = filename
         self.proposals = proposals
+        self.mode = mode
+        self.acceptedIDs = acceptedIDs
         self.exportAvailable = exportAvailable
         self.progress = progress
         self.onExport = onExport
@@ -53,7 +58,7 @@ public struct CineoAutoEditView: View {
                     Text(filename).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Picker("Editing", selection: $mode) {
+                Picker("Editing", selection: mode) {
                     ForEach(Mode.allCases) { choice in Text(choice.rawValue).tag(choice) }
                 }.pickerStyle(.segmented).frame(maxWidth: 320)
             }
@@ -63,7 +68,7 @@ public struct CineoAutoEditView: View {
                                        description: Text("La preview reale verrà fornita dal renderer condiviso; non viene mostrato un video simulato."))
                     .frame(maxWidth: .infinity, minHeight: 160)
             }
-            if mode != .studio {
+            if mode.wrappedValue != .studio {
                 Text("Interventi proposti").font(.headline)
                 if proposals.isEmpty {
                     Text("Nessun evento disponibile: styling e zoom manuale rimangono utilizzabili.")
@@ -71,10 +76,12 @@ public struct CineoAutoEditView: View {
                 }
                 ForEach(proposals) { proposal in
                     Toggle(isOn: Binding(
-                        get: { acceptedIDs.contains(proposal.id) },
+                        get: { acceptedIDs.wrappedValue.contains(proposal.id) },
                         set: { isOn in
-                            if isOn { acceptedIDs.insert(proposal.id) }
-                            else { acceptedIDs.remove(proposal.id) }
+                            var updated = acceptedIDs.wrappedValue
+                            if isOn { updated.insert(proposal.id) }
+                            else { updated.remove(proposal.id) }
+                            acceptedIDs.wrappedValue = updated
                             onChangeAcceptance(proposal.id, isOn)
                         }
                     )) {
