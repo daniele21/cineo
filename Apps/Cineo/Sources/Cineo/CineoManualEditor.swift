@@ -120,7 +120,11 @@ final class CineoEditorModel: ObservableObject {
     func changeFocus(x: Double? = nil, y: Double? = nil) {
         if let x { focusX = min(1, max(0, x)) }
         if let y { focusY = min(1, max(0, y)) }
-        saveKeyframe()
+        // In Assisted mode, picking a target is not an edit yet: only the
+        // explicit "Suggest zoom" action should write camera keyframes.
+        // Otherwise the target click would create a keyframe and block its
+        // own assistive animation with the manual-override collision guard.
+        if mode == .manual { saveKeyframe() }
     }
 
     func choosePoint(x: Double, y: Double) {
