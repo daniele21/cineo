@@ -5,7 +5,9 @@ set -euo pipefail
 # Explicitly does not invoke xcodebuild or require Xcode.app.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE="$ROOT/Apps/Cineo"
-BUILD_ROOT="${CINEO_CLT_BUILD_ROOT:-${TMPDIR:-/tmp}/cineo-clt-native}"
+# Keep the local app at one durable path as well as one signing identity.
+# CI and worktrees may override this without affecting normal local use.
+BUILD_ROOT="${CINEO_CLT_BUILD_ROOT:-$HOME/Library/Application Support/Cineo/Builds}"
 # Isolated real-Mac regression build for the stop/finalization candidate.
 # Keep regular Cineo's bundle identity and TCC settings untouched.
 if [[ "${CINEO_CLT_ISOLATED_CAPTURE:-0}" == "1" ]]; then
@@ -31,6 +33,25 @@ fi
   echo "Install using: xcode-select --install" >&2
   exit 2
 }
+SIGNING_MODE="${CINEO_SIGNING_MODE:-persistent}"
+case "$SIGNING_MODE" in
+  persistent)
+    SIGNING_IDENTITY="$(bash "$ROOT/scripts/ensure-cineo-signing.sh")"
+    [[ "$SIGNING_IDENTITY" =~ ^[0-9A-Fa-f]{40}$ ]] || {
+      echo "Invalid persistent signing identity." >&2; exit 2;
+    }
+    echo "Cineo local signing identity: $SIGNING_IDENTITY"
+    ;;
+  adhoc)
+    # CI-only: never use this for a dev build that needs persistent TCC.
+    SIGNING_IDENTITY="-"
+    echo "WARNING: ad-hoc signature; screen recording grants will NOT survive code changes." >&2
+    ;;
+  *)
+    echo "Invalid CINEO_SIGNING_MODE: $SIGNING_MODE (expected persistent or adhoc)" >&2
+    exit 2
+    ;;
+esac
 printf 'Building native Cineo with %s\n' "$(xcode-select -p)"
 swift --version
 xcrun --sdk macosx --show-sdk-path
@@ -72,13 +93,29 @@ if [[ "${CINEO_CLT_ISOLATED_CAPTURE:-0}" == "1" ]]; then
 fi
 plutil -lint "$STAGE/Contents/Info.plist"
 
-# Ad-hoc signing for local experimentation only. For repeatable TCC identity
-# and distribution use a real developer certificate/notarization separately.
-codesign --force --sign - --timestamp=none "$STAGE"
+# Persistent local signing avoids build-specific designated requirements.
+# A Developer ID certificate and notarization remain release-only concerns.
+if [[ "$SIGNING_MODE" == "persistent" ]]; then
+  codesign --force --sign "$SIGNING_IDENTITY" --timestamp=none \
+    --keychain "${CINEO_SIGNING_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}" "$STAGE"
+else
+  codesign --force --sign - --timestamp=none "$STAGE"
+fi
 codesign --verify --strict --verbose=2 "$STAGE"
+DESIGNATED_REQUIREMENT="$(codesign --display --requirements - "$STAGE" 2>&1)"
+if [[ "$SIGNING_MODE" == "persistent" ]]; then
+  if ! grep -q 'designated =>' <<< "$DESIGNATED_REQUIREMENT" || \
+     grep -qi 'cdhash' <<< "$DESIGNATED_REQUIREMENT"; then
+    echo "Failed: signing did not yield a stable certificate-based designated requirement." >&2
+    echo "$DESIGNATED_REQUIREMENT" >&2
+    exit 3
+  fi
+  echo "Verified certificate-backed designated requirement:"
+  printf '%s\n' "$DESIGNATED_REQUIREMENT" | grep 'designated =>'
+fi
 rm -rf "$APP"
 mv "$STAGE" "$APP"
-echo "PASS: Xcode-free native Cineo screen capture app compiled and ad-hoc signed."
+echo "PASS: Xcode-free native Cineo screen capture app compiled and signed ($SIGNING_MODE)."
 echo "App: $APP"
 echo "No screen data is recorded until you open the app and click Record."
 echo "Not part of this alpha: Orbit editor, Smart Zooms and audio recording."
