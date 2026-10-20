@@ -1,6 +1,8 @@
 import Foundation
 import SwiftUI
 import AVFoundation
+import CoreVideo
+import Combine
 import AppKit
 import UniformTypeIdentifiers
 import CoreImage
@@ -34,6 +36,8 @@ final class CineoEditorModel: ObservableObject {
     @Published var preview: NSImage?
     @Published var status = "Apri una registrazione per iniziare."
     @Published var loadingPreview = false
+    @Published private(set) var isPreviewPlaying = false
+    @Published private(set) var previewActualFPS = 0
     @Published var isExporting = false
     @Published var exportProgress: Double = 0
     @Published var outputURL: URL?
@@ -50,6 +54,10 @@ final class CineoEditorModel: ObservableObject {
     private var previewRequest = UUID()
     private var previewGenerator: AVAssetImageGenerator?
     private let previewCIContext = CIContext()
+    private var previewPlayer: AVPlayer?
+    private var previewFrameOutput: AVPlayerItemVideoOutput?
+    private var displayedFrameCount = 0
+    private var displayedFrameWindowStart = ProcessInfo.processInfo.systemUptime
     private var exportTask: Task<Void, Never>?
 
     var outputWidth: Int { portrait ? 1080 : 1920 }
@@ -70,6 +78,9 @@ final class CineoEditorModel: ObservableObject {
     func open(_ url: URL) async {
         guard !isExporting && !isSavingProject else { return }
         status = "Caricamento del video o progetto…"
+        pausePreviewPlayback()
+        previewPlayer = nil
+        previewFrameOutput = nil
         previewTask?.cancel()
         previewGenerator = nil
         preview = nil
@@ -115,6 +126,18 @@ final class CineoEditorModel: ObservableObject {
             generator.requestedTimeToleranceBefore = CMTime(value: 1, timescale: 60)
             generator.requestedTimeToleranceAfter = CMTime(value: 1, timescale: 60)
             previewGenerator = generator
+            // Read frames from AVPlayer's actual decoder and composite them
+            // with CineoScene. Never show the raw, unedited AVPlayer surface.
+            let item = AVPlayerItem(asset: asset)
+            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ])
+            item.add(output)
+            let player = AVPlayer(playerItem: item)
+            player.isMuted = true
+            player.actionAtItemEnd = .pause
+            previewFrameOutput = output
+            previewPlayer = player
             sourcePixelWidth = Int(size.width)
             sourcePixelHeight = Int(size.height)
             selectedTime = 0
@@ -245,6 +268,9 @@ final class CineoEditorModel: ObservableObject {
             status = "Termina o annulla l'esportazione prima di chiudere l'editor."
             return
         }
+        pausePreviewPlayback()
+        previewPlayer = nil
+        previewFrameOutput = nil
         previewTask?.cancel()
         previewTask = nil
         previewGenerator = nil
@@ -255,6 +281,7 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func scrub(_ seconds: Double) {
+        pausePreviewPlayback()
         selectedTime = min(max(seconds, 0), max(0, duration - 0.05))
         if let state = try? currentPlan.evaluate(
             time: selectedTime, sourceWidth: sourcePixelWidth, sourceHeight: sourcePixelHeight
@@ -358,11 +385,13 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func updateStyle() {
+        pausePreviewPlayback()
         savePlan()
         refreshPreview()
     }
 
     private func saveKeyframe() {
+        pausePreviewPlayback()
         importedActionMarkers = []
         let frame = CineoCameraKeyframe(
             time: max(0, selectedTime), zoom: zoom,
@@ -472,8 +501,89 @@ final class CineoEditorModel: ObservableObject {
         }
     }
 
+    /// Live preview of *edited* video, using the same CineoScene frame
+    /// compositor as export. AVPlayer decodes and clocks the source. The
+    /// presenter drops frames when late instead of slowing the timeline.
+    func togglePreviewPlayback() {
+        guard let player = previewPlayer, sourceURL != nil, !isExporting else { return }
+        if isPreviewPlaying {
+            pausePreviewPlayback()
+            status = "Anteprima in pausa. Puoi scorrere i singoli fotogrammi."
+            return
+        }
+        if selectedTime >= duration - 0.09 {
+            selectedTime = 0
+        }
+        previewTask?.cancel()
+        previewRequest = UUID()
+        let time = CMTime(seconds: selectedTime, preferredTimescale: 600)
+        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        displayedFrameCount = 0
+        previewActualFPS = 0
+        displayedFrameWindowStart = ProcessInfo.processInfo.systemUptime
+        isPreviewPlaying = true
+        loadingPreview = false
+        status = "Anteprima Play: frame già composti con gli effetti Cineo, senza esportazione."
+        player.play()
+    }
+
+    func pausePreviewPlayback() {
+        guard isPreviewPlaying else { return }
+        previewPlayer?.pause()
+        isPreviewPlaying = false
+    }
+
+    /// Called by an active UI timer; never fabricate a playback frame. AVPlayer
+    /// chooses the timeline clock; sample only if its output decoded a frame.
+    func renderPlaybackTick() {
+        guard isPreviewPlaying, let player = previewPlayer,
+              let output = previewFrameOutput else { return }
+        let timestamp = player.currentTime()
+        let seconds = timestamp.seconds
+        guard seconds.isFinite, seconds >= 0 else { return }
+        if seconds >= duration - 0.06 {
+            pausePreviewPlayback()
+            selectedTime = max(0, duration - 0.06)
+            status = "Anteprima terminata. L'esportazione non è necessaria per rivederla."
+            return
+        }
+        selectedTime = seconds
+        guard output.hasNewPixelBuffer(forItemTime: timestamp),
+              let buffer = output.copyPixelBuffer(forItemTime: timestamp,
+                                                  itemTimeForDisplay: nil) else { return }
+        do {
+            let plan = currentPlan
+            let stage = try CineoSceneFrameRenderer.compose(
+                CIImage(cvPixelBuffer: buffer), at: seconds, with: plan
+            )
+            // Present a bounded ~960px proxy to reduce preview GPU load.
+            // Same scene geometry and easing as final 1920/1080p export.
+            let downscale = min(1.0, 960.0 / Double(max(plan.outputWidth, plan.outputHeight)))
+            let scaled = stage.transformed(by: CGAffineTransform(
+                scaleX: downscale, y: downscale
+            ))
+            let bounds = CGRect(x: 0, y: 0,
+                width: CGFloat(Double(plan.outputWidth) * downscale),
+                height: CGFloat(Double(plan.outputHeight) * downscale))
+            if let image = previewCIContext.createCGImage(scaled, from: bounds) {
+                preview = NSImage(cgImage: image, size: bounds.size)
+                displayedFrameCount += 1
+                let now = ProcessInfo.processInfo.systemUptime
+                if now - displayedFrameWindowStart >= 1 {
+                    previewActualFPS = displayedFrameCount
+                    displayedFrameCount = 0
+                    displayedFrameWindowStart = now
+                }
+            }
+        } catch {
+            pausePreviewPlayback()
+            status = "Anteprima video sospesa: \(error.localizedDescription)"
+        }
+    }
+
     func export() {
         guard let url = sourceURL, !isExporting else { return }
+        pausePreviewPlayback()
         let plan = currentPlan
         let folder = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Cineo/Edited", isDirectory: true)
@@ -619,6 +729,15 @@ struct CineoManualEditorView: View {
                     }
                     .frame(width: 720, height: 410)
                     HStack {
+                        Button {
+                            editor.togglePreviewPlayback()
+                        } label: {
+                            Label(editor.isPreviewPlaying ? "Pausa" : "Play",
+                                  systemImage: editor.isPreviewPlaying ? "pause.fill" : "play.fill")
+                        }
+                        .disabled(editor.sourceURL == nil || editor.isExporting)
+                        .keyboardShortcut(.space, modifiers: [])
+                        .help("Riproduci gli effetti Cineo prima dell'esportazione")
                         Button { editor.stepPreview(frames: -1) } label: {
                             Image(systemName: "backward.frame.fill")
                         }
@@ -639,6 +758,11 @@ struct CineoManualEditorView: View {
                         }
                         .help("Fotogramma successivo")
                         .disabled(editor.sourceURL == nil)
+                    }
+                    if editor.isPreviewPlaying {
+                        Text("Anteprima: \(editor.previewActualFPS) fps visualizzati · qualità proxy")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
                     }
                     Text("Seleziona un momento nella timeline, poi clicca sull'anteprima per scegliere il punto d'interesse.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -749,6 +873,9 @@ struct CineoManualEditorView: View {
         .padding(20)
         .frame(minWidth: 1040, minHeight: 580)
         .tint(CineoBrand.ocean)
+        .onReceive(Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()) { _ in
+            editor.renderPlaybackTick()
+        }
         .sheet(isPresented: Binding(
             get: { editor.showingInstructions },
             set: { editor.showingInstructions = $0 }
