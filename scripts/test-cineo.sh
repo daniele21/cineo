@@ -14,6 +14,8 @@ Cineo macOS tests — default build uses CLT + SwiftPM, no Xcode.app
   bash scripts/test-cineo.sh --quick        Run CLT smoke for Director/Project/Timeline.
   bash scripts/test-cineo.sh --native       Compile Cineo Capture Alpha using CLT.
   bash scripts/test-cineo.sh --interactive  Build + open local ad-hoc-signed Cineo.
+  bash scripts/test-cineo.sh --isolated-capture
+                                           Build + launch distinctly named Stop Fix candidate.
   bash scripts/test-cineo.sh --exports --landscape "/path/video16x9.mp4"
                                            Inspect exported H.264 MP4 locally.
   bash scripts/test-cineo.sh --legacy-orbit-native
@@ -71,8 +73,19 @@ native() {
 interactive() {
   configure_clt
   bash scripts/build-cineo-clt.sh
-  local app="${CINEO_CLT_BUILD_ROOT:-${TMPDIR:-/tmp}/cineo-clt-native}/Cineo.app"
+  local app_name="Cineo.app"
+  if [[ "${CINEO_CLT_ISOLATED_CAPTURE:-0}" == "1" ]]; then
+    app_name="Cineo Stop Fix.app"
+  fi
+  local app="${CINEO_CLT_BUILD_ROOT:-${TMPDIR:-/tmp}/cineo-clt-native}/$app_name"
   [[ -x "$app/Contents/MacOS/Cineo" ]] || fail "Expected Cineo executable missing: $app"
+  if [[ "${CINEO_CLT_ISOLATED_CAPTURE:-0}" == "1" ]]; then
+    local bundle_id
+    bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")"
+    [[ "$bundle_id" == "com.daniele21.cineo.capturealpha.stopfix" ]] || fail "Unexpected diagnostic app identity: $bundle_id"
+    echo "VERIFIED isolated bundle ID: $bundle_id"
+    echo "SOURCE HEAD: $(git rev-parse HEAD)"
+  fi
   # LaunchServices may otherwise activate an already-running Cineo.app
   # from a previous build (same CFBundleIdentifier) instead of this build.
   # -n forces a fresh process; -a selects the exact just-built bundle path.
@@ -162,6 +175,7 @@ case "$MODE" in
   --quick) (( $# == 0 )) || fail "Unexpected arguments"; quick ;;
   --native) (( $# == 0 )) || fail "Unexpected arguments"; native ;;
   --interactive) (( $# == 0 )) || fail "Unexpected arguments"; interactive ;;
+  --isolated-capture) (( $# == 0 )) || fail "Unexpected arguments"; export CINEO_CLT_ISOLATED_CAPTURE=1; interactive ;;
   --legacy-orbit-native) (( $# == 0 )) || fail "Unexpected arguments"; legacy_orbit_native ;;
   --legacy-orbit-interactive) (( $# == 0 )) || fail "Unexpected arguments"; legacy_orbit_interactive ;;
   --exports) exports "$@" ;;
