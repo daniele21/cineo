@@ -58,25 +58,14 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/test-cineo.sh --native
-          test -x "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/MacOS/Cineo"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/Info.plist")" = com.daniele21.cineo.capturealpha
-          codesign --verify --strict "$CINEO_CLT_BUILD_ROOT/Cineo.app"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CineoSourceCommit' "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/Info.plist")" = "$(git rev-parse --short=12 HEAD)"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CineoCaptureImplementation' "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/Info.plist")" = "stream-stop-v2"
-          echo "Native Cineo app packaged under standalone CLT."
-      - name: Package distinctly identified Stop Fix candidate
-        env:
-          CINEO_CLT_BUILD_ROOT: ${{ runner.temp }}/cineo-stopfix
-          CINEO_CLT_ISOLATED_CAPTURE: '1'
-        run: |
-          set -euo pipefail
-          bash scripts/build-cineo-clt.sh
-          app="$CINEO_CLT_BUILD_ROOT/Cineo Stop Fix.app"
+          app="$CINEO_CLT_BUILD_ROOT/Cineo Dev.app"
           test -x "$app/Contents/MacOS/Cineo"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = com.daniele21.cineo.capturealpha.stopfix
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$app/Contents/Info.plist")" = "Cineo Stop Fix"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = com.daniele21.cineo.capturealpha.dev
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$app/Contents/Info.plist")" = "Cineo Dev"
           codesign --verify --strict "$app"
-          echo "PASS: isolated capture candidate signed and verified."
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CineoSourceCommit' "$app/Contents/Info.plist")" = "$(git rev-parse --short=12 HEAD)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CineoCaptureImplementation' "$app/Contents/Info.plist")" = "stream-stop-v2"
+          echo "Native Cineo Dev app packaged with one stable bundle identity under standalone CLT."
 
   # A separate job exercises persistent signing with an ephemeral CI Keychain.
   # It never imports/exports the developer's real signing certificate.
@@ -102,7 +91,7 @@ jobs:
           second="$(bash scripts/ensure-cineo-signing.sh)"
           test "$first" = "$second"
           bash scripts/build-cineo-clt.sh
-          app="$CINEO_CLT_BUILD_ROOT/Cineo.app"
+          app="$CINEO_CLT_BUILD_ROOT/Cineo Dev.app"
           req_before="$(codesign -d -r- "$app" 2>&1 | grep 'designated =>')"
           test -n "$req_before"
           if grep -qi 'cdhash' <<< "$req_before"; then exit 1; fi
