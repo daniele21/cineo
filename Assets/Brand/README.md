@@ -8,6 +8,7 @@ This directory contains the original user-supplied Cineo Brand Kit (20 October 2
 - `cineo.css`: web-oriented token variables (not used directly by SwiftUI)
 - `cineo-symbol-primary.svg`: official reconstructed Cursor Zoom master
 - `cineo-logo-horizontal-dark.svg` and `cineo-logo-horizontal-white.svg`: horizontal logos with appropriate contrast
+- `cineo-logo-stacked-dark.svg`, `cineo-logo-stacked-white.svg`, `cineo-symbol-flat.svg`, `cineo-symbol-ink.svg`, `cineo-symbol-white.svg`: official format and contrast variants for future surfaces
 - `cineo-app-icon.icns.base64`: **exact Base64 encoding of the supplied .icns**, not a new logo; the CLT build decodes into `Cineo Dev.app/Contents/Resources/Cineo.icns`
 - `cineo-symbol-primary-256.png.base64`: **exact Base64 encoding of supplied PNG**; decode to `CineoSymbol.png` at app packaging
 - `cineo-logo-horizontal-dark.png.base64`: **exact Base64 encoding of supplied PNG**; decode to `CineoWordmark.png` at app packaging
