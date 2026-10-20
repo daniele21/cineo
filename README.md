@@ -50,6 +50,21 @@ Cineo should focus on **the feature's result**, not blindly zooming on every cli
 
 We intentionally will **not** introduce multiple parallel compositor/timeline implementations or mandatory AI into the MVP.
 
+## Try Cineo on a Mac
+
+A [single test script](docs/testing/local-test-runner.md) covers diagnostics, Swift unit tests, unsigned native build/integration tests, an explicitly signed interactive launch and local MP4 inspection.
+
+```bash
+bash scripts/test-cineo.sh --preflight
+bash scripts/test-cineo.sh --quick
+bash scripts/test-cineo.sh --native
+
+# Only when ready to open the local signed development app:
+CINEO_APPLE_TEAM=YOUR10CHARID bash scripts/test-cineo.sh --interactive
+```
+
+Native CI tests are synthetic. Real screen recording, OS permission approval, audio and video exports must still be checked by a person on a Mac.
+
 ## Next step: P1 native app smoke
 
 1. Run `bash scripts/bootstrap-native.sh --plan` to inspect the pinned native stage.
