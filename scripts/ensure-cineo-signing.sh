@@ -111,8 +111,13 @@ EOF
     # Use a throwaway random export password; the persistent private key will
     # live in the Keychain, not in a .p12 file after this command finishes.
     p12_password="$(openssl rand -hex 24)"
+    # Apple's security import is incompatible with the AES/PBES2
+    # PKCS#12 defaults used by some recent OpenSSL versions. These
+    # compatibility options only protect the short-lived transfer container;
+    # the signing identity itself remains RSA-3072 / SHA-256 in Keychain.
     openssl pkcs12 -export -inkey "$tmp/private-key.pem" \
       -in "$tmp/certificate.pem" -out "$tmp/identity.p12" \
+      -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
       -passout "pass:$p12_password" >/dev/null 2>&1
     sha="$(openssl x509 -in "$tmp/certificate.pem" -noout -fingerprint -sha1 |
       awk -F= '{gsub(":","",$2); print toupper($2)}')"
