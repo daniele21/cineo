@@ -76,6 +76,27 @@ trap 'rm -rf "$STAGE_DIR"' EXIT
 STAGE="$STAGE_DIR/Cineo Dev.app"
 mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
 cp "$BIN_DIR/Cineo" "$STAGE/Contents/MacOS/Cineo"
+# Brand kit files are committed as base64 text so the GitHub connector and
+# CLT-only checkout preserve the original supplied binary .icns and PNG bytes.
+# Decode into the one staged app (never create another app identity).
+BRAND="$ROOT/Assets/Brand"
+for spec in \
+  "cineo-app-icon.icns.base64:Cineo.icns" \
+  "cineo-symbol-primary-256.png.base64:CineoSymbol.png" \
+  "cineo-logo-horizontal-dark.png.base64:CineoWordmark.png"; do
+  source_name="${spec%%:*}"
+  target_name="${spec#*:}"
+  [[ -s "$BRAND/$source_name" ]] || {
+    echo "Missing Cineo Brand Kit asset: $BRAND/$source_name" >&2
+    exit 3
+  }
+  base64 -D -i "$BRAND/$source_name" -o "$STAGE/Contents/Resources/$target_name" || {
+    echo "Unable to decode Cineo Brand Kit asset: $source_name" >&2
+    exit 3
+  }
+  [[ -s "$STAGE/Contents/Resources/$target_name" ]] || exit 3
+done
+# The logo/icon resources are baked into the certificate-signed app bundle.
 cat > "$STAGE/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -85,6 +106,7 @@ cat > "$STAGE/Contents/Info.plist" <<'EOF'
   <key>CFBundleExecutable</key><string>Cineo</string>
   <key>CFBundleName</key><string>Cineo Dev</string>
   <key>CFBundleDisplayName</key><string>Cineo Dev</string>
+  <key>CFBundleIconFile</key><string>Cineo</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>1</string>
