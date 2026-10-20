@@ -57,6 +57,7 @@ struct CaptureLogEntry: Identifiable {
 
 private struct CaptureDashboard: View {
     @ObservedObject var recorder: CineoScreenRecorder
+    @State private var logsExpanded = true
 
     private var timeText: String {
         let total = Int(recorder.recordedSeconds)
@@ -170,39 +171,51 @@ private struct CaptureDashboard: View {
             .padding(14)
             .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
 
-            DisclosureGroup("Activity log (\(recorder.logs.count))") {
+            DisclosureGroup(isExpanded: $logsExpanded) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
+                        Text("Recent capture and file events")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Spacer()
                         Button("Copy diagnostics") {
                             recorder.copyDiagnostics()
                         }
                         .font(.caption)
                     }
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(recorder.logs) { entry in
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Text(entry.date, style: .time)
-                                        .monospacedDigit()
-                                        .foregroundStyle(.secondary)
-                                    Image(systemName: entry.level == .error ? "exclamationmark.circle" :
-                                          entry.level == .warning ? "exclamationmark.triangle" : "checkmark.circle")
-                                        .foregroundStyle(entry.level == .error ? .red : .secondary)
-                                    Text(entry.message)
-                                        .textSelection(.enabled)
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 6) {
+                                ForEach(recorder.logs) { entry in
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        Text(entry.date, style: .time)
+                                            .monospacedDigit()
+                                            .foregroundStyle(.secondary)
+                                        Image(systemName: entry.level == .error ? "exclamationmark.circle" :
+                                              entry.level == .warning ? "exclamationmark.triangle" : "checkmark.circle")
+                                            .foregroundStyle(entry.level == .error ? .red : .secondary)
+                                        Text(entry.message)
+                                            .textSelection(.enabled)
+                                    }
+                                    .font(.caption)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .id(entry.id)
                                 }
-                                .font(.caption)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .frame(maxHeight: 175)
+                        .onChange(of: recorder.logs.count) { _, _ in
+                            if let last = recorder.logs.last {
+                                proxy.scrollTo(last.id, anchor: .bottom)
                             }
                         }
                     }
-                    .frame(maxHeight: 175)
                 }
                 .padding(.top, 6)
+            } label: {
+                Label("Activity log (\(recorder.logs.count))", systemImage: "list.bullet.rectangle")
+                    .font(.callout.weight(.medium))
             }
-            .font(.callout)
-
             Text("The editor and cinematic zooms are not yet connected to this CLT-native alpha. Video and diagnostics stay on this Mac.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
