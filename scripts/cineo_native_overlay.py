@@ -75,8 +75,27 @@ def apply_overlay(root: Path) -> None:
 
     main = replace_exact(main_file.read_text(), "        ContainerMigration.run()\n",
                          "        // Cineo never imports Orbit sandbox data.\n", 1)
+    # Unregistering the URL scheme alone is not sufficient. The old
+    # --mcp entrypoint could still start an unaudited local agent process.
+    main = replace_exact(
+        main,
+        "        if CommandLine.arguments.dropFirst().first == AgentBridgeClient.argument {\n"
+        "            AgentBridgeClient.run()\n"
+        "        }",
+        "        if CommandLine.arguments.dropFirst().first == AgentBridgeClient.argument {\n"
+        "            // Cineo P1: reject upstream agent entrypoint until a privacy review.\n"
+        "            return\n"
+        "        }", 1
+    )
     app = replace_exact(app_file.read_text(), "Image(.menuBarIcon)",
                         'Image(systemName: "record.circle")', 1)
+    # Never show a Screen Recording TCC prompt merely by opening the menu.
+    # The native CaptureEngine already requests it when capture is initiated.
+    app = replace_exact(
+        app,
+        "                    await viewModel.requestPermissionsOnLaunch()",
+        "                    viewModel.refreshPermissions()", 1
+    )
     delegate = replace_exact(delegate_file.read_text(), "        agentBridge.start()\n",
                              "        // P1: upstream local agent bridge disabled until explicit security review.\n", 1)
 
