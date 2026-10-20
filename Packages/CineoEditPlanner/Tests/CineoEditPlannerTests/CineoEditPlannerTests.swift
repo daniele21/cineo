@@ -82,4 +82,37 @@ struct CineoEditPlannerTests {
             try plan.validate(against: edited)
         }
     }
+    @Test func sameDurationTrimShiftCannotReusePreviousCameraPlan() throws {
+        let original = sample()
+        let plan = try CineoEditPlanner().suggest(for: original, events: [])
+        var changed = original
+        // Both spans still total six output seconds: checking duration alone
+        // would accept a camera on the wrong source timestamp.
+        changed.edits[1].sourceStart = 11
+        changed.edits[1].sourceEnd = 15
+        #expect(try TimelineMapper.outputDuration(for: original) ==
+                TimelineMapper.outputDuration(for: changed))
+        #expect(throws: SuggestedCameraError.incompatibleProject) {
+            try plan.validate(against: changed)
+        }
+    }
+
+    @Test func differentOutputCanvasInvalidatesSuggestedFocus() throws {
+        let original = sample()
+        let plan = try CineoEditPlanner().suggest(for: original, events: [])
+        var portrait = original
+        portrait.canvas = Canvas(width: 1080, height: 1920)
+        #expect(throws: SuggestedCameraError.incompatibleProject) {
+            try plan.validate(against: portrait)
+        }
+    }
+
+    @Test func savedCameraStateDoesNotStorePrivateMediaPaths() throws {
+        let original = sample()
+        let plan = try CineoEditPlanner().suggest(for: original, events: [])
+        let json = String(decoding: try JSONEncoder().encode(plan), as: UTF8.self)
+        #expect(!json.contains("Media/source.mov"))
+        #expect(plan.schemaVersion == 2)
+    }
+
 }
