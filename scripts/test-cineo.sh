@@ -73,6 +73,18 @@ native() {
 }
 interactive() {
   configure_clt
+  # A previous Cineo process keeps executing the old binary even after its
+  # .app bundle gets replaced. Refuse to launch another identical-looking
+  # window: require the developer to deliberately close every Cineo first.
+  if pgrep -x Cineo >/dev/null 2>&1; then
+    echo "ERROR: One or more Cineo processes are already running." >&2
+    echo "Quit ALL Cineo and Cineo Stop Fix windows with Command-Q, then retry." >&2
+    echo "Existing Cineo processes (no process was terminated):" >&2
+    for pid in $(pgrep -x Cineo); do
+      ps -p "$pid" -o pid= -o command= >&2 || true
+    done
+    return 2
+  fi
   bash scripts/build-cineo-clt.sh
   local app_name="Cineo.app"
   if [[ "${CINEO_CLT_ISOLATED_CAPTURE:-0}" == "1" ]]; then
@@ -93,8 +105,25 @@ interactive() {
   # A persistent certificate and stable bundle ID preserve Screen Recording
   # consent after the initial macOS grant, even across subsequent rebuilds.
   echo "Launching a NEW Cineo process from: $app"
-  echo "Quit any earlier Cineo window to avoid recording with the wrong build."
+  echo "Build commit: $(git rev-parse --short=12 HEAD)"
   open -n -a "$app"
+  local appeared=0
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if pgrep -x Cineo >/dev/null 2>&1; then
+      appeared=1
+      break
+    fi
+    sleep 0.5
+  done
+  if [[ "$appeared" != 1 ]]; then
+    echo "ERROR: macOS did not expose a Cineo process after launch." >&2
+    echo "Check macOS app signing / LaunchServices errors. Build was not considered launched." >&2
+    return 3
+  fi
+  echo "Running Cineo process(es):"
+  for pid in $(pgrep -x Cineo); do
+    ps -p "$pid" -o pid= -o command= || true
+  done
   cat <<'EOF'
 Cineo Capture Alpha opened (new instance of the exact bundle above).
 1. Choose Record main display and grant permission in macOS if prompted.
