@@ -1,0 +1,25 @@
+name: Cineo Auto Edit native UI compilation
+
+on:
+  pull_request:
+    paths:
+      - 'Packages/CineoAutoEditUI/**'
+      - '.github/workflows/autoedit-ui-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-clt:
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Library/Developer/CommandLineTools
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated SwiftUI editor shell without Xcode app
+        run: |
+          swift --version
+          swift build --package-path Packages/CineoAutoEditUI --configuration release
+          echo "View package compiles; preview/export service integration is still pending."
