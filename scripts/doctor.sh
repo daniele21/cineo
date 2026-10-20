@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "Cineo developer environment (discovery phase)"
+echo "Cineo developer environment (native P1 + package experiments)"
 echo "OS: $(uname -s) $(uname -m)"
 if command -v swift >/dev/null 2>&1; then
   swift --version | head -n 2
@@ -33,4 +33,11 @@ if [[ -f Packages/CineoDirector/Package.swift ]]; then
   echo "CineoDirector Swift package: present"
 else
   echo "CineoDirector Swift package: not present on this branch"
+fi
+
+if [[ -f Packages/CineoProject/Package.swift ]]; then
+  echo "CineoProject Swift package: present"
+fi
+if [[ -f scripts/native-smoke-doctor.sh ]]; then
+  echo "Native smoke doctor: present (requires a built macOS Cineo.app)"
 fi

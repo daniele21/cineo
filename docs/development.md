@@ -1,6 +1,6 @@
 # Developing Cineo — current environment contract
 
-**Stage:** P0 research and independent Swift package prototypes. There is **no Cineo.app or Cineo.xcodeproj yet**. The inherited repo-template-sw directories are kept as reference material while issue #2 gradually adapts engineering configuration.
+**Stage:** conditional Orbit-based P1 native prototype. Cineo produces an **unsigned staging Cineo.app** through its pinned bootstrap; this is not an integrated, signed, tested recording product. The inherited template material remains until issue #2 is completed.
 
 ## Current runnable commands
 
@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | Environment diagnosis | `bash scripts/doctor.sh` | Host OS, Swift, Xcode presence |
 | Pure camera prototype build | `swift build --package-path Packages/CineoDirector` | Swift package only; not macOS capture |
-| Pure camera tests | `swift test --package-path Packages/CineoDirector` | Camera planner logic, cross-platform |
+| Project persistence/time mapper tests | `swift test --package-path Packages/CineoProject` | Schema/timeline logic, cross-platform (once merged) |\n| Pure camera tests | `swift test --package-path Packages/CineoDirector` | Camera planner logic, cross-platform |
 | Inspect upstream benchmark targets | `bash scripts/benchmark-upstreams.sh --list` | Pinned versions and planned Mac build commands |
 | Fetch/compile selected upstream | `bash scripts/benchmark-upstreams.sh --run orbit` | macOS + Xcode 26 + network required |
 | Fetch/compile CineScreen | `bash scripts/benchmark-upstreams.sh --run cinescreen` | macOS, XcodeGen and Metal toolchain may be needed |
@@ -71,3 +71,7 @@ On a real Mac, record the exact macOS/Xcode version and follow this checklist:
 Store **redacted** results with captured source hashes and exported video evidence. If launch/TCC/export fails, keep P1 blocked and revisit the Orbit choice per the ADR. Do not use GitHub-hosted CI alone as evidence of these physical-Mac requirements.
 
 See [P0 provenance](research/p0-provenance-inventory.md) and [P1 roadmap](roadmap.md).
+
+## Native smoke preflight
+
+After creating an unsigned staging app on macOS, run `bash scripts/native-smoke-doctor.sh --app /path/to/Cineo.app --allow-unsigned` to inspect bundle metadata. After signing with your own developer identity, omit `--allow-unsigned`: the doctor checks actual signature validity. This still does not run interactive capture or export. Follow [native test protocol](testing/native-smoke.md) for mandatory TCC, audio and output acceptance.
