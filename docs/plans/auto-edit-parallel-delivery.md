@@ -141,3 +141,54 @@ Each PR must declare files/contract versions touched, tests run, CLT-only comman
 6. Use quality results to decide whether to prioritize adaptive editing, more effects, or a future opt-in semantic Director.
 
 **Definition of done:** one real Mac capture can be opened as a project, automatically styled, optionally manually corrected, and **exported as a different playable video**; the equivalent local headless workflow produces the same planned scene; original footage and user edits survive failure/reopen. A compiled library, isolated synthetic test or static UI mock alone does not qualify.
+
+---
+
+## Execution update — 2026-10-20 evening: integrate existing parallel PRs, not duplicate work
+
+**Status:** execution-ready integration plan; the claims below describe inspected GitHub branches, *not* a Mac-validated editor. This update supersedes the earlier generic suggested branch names where actual PRs exist.
+
+### Existing active lanes and precise handoff
+
+| Lane | Existing PR | Integration action | Proof / blocker |
+| --- | --- | --- | --- |
+| Capture G0 (serial) | [#44](https://github.com/daniele21/cineo/pull/44) `fix/screencapture-stop-finalization-race` | Gate screen recording lifecycle, persistent dev identity, physical-Mac regression | Real 3/10/60 s captures, two consecutive sessions, stable TCC on rebuild, decoded MP4; still draft |
+| A project | [#49](https://github.com/daniele21/cineo/pull/49) `feat/autoedit-project-import` | Wire verified video import and durable `.cineo` manifest; decide migration of `~/Movies/Cineo/Edits` sidecars from #55 | Save/reopen/source SHA; actual media import |
+| B renderer | [#50](https://github.com/daniele21/cineo/pull/50) `feat/autoedit-coreimage-renderer` | Establish **one canonical** CineoScene FrameRenderer + AVFoundation export, real preview/export parity | CLT compile; source MP4 → modified MP4, sample frames at 0/mid/end, clean cancellation |
+| C telemetry | [#51](https://github.com/daniele21/cineo/pull/51) `feat/autoedit-pointer-clock` | Connect mouse-only opt-in sidecar to ScreenCaptureKit adapter **after** capture gate | Physical-Mac first-frame PTS / cursor position and click alignment, corner/Retina/multidisplay cases |
+| D UX | [#52](https://github.com/daniele21/cineo/pull/52) `feat/autoedit-native-ui` + [#55](https://github.com/daniele21/cineo/pull/55) `feat/cineo-interactive-editor` | Treat #52 as UX/reference; use #55 as **candidate actual Cineo Dev editor**, reconcile view models and durable project, avoid installing two editors | Real scrub, manual focus, assist, editable keyframes, actual output in QuickTime |
+| E automation | [#53](https://github.com/daniele21/cineo/pull/53) `feat/autoedit-headless-cli` | Connect inspect/plan/validate to same scene+project service; defer CLI render until B passes | Deterministic plan JSON, no second compositor |
+| F QA | [#54](https://github.com/daniele21/cineo/pull/54) `test/autoedit-quality-gates` | Run source hash, corrupted media, no-click, corner and short/long clips; collect real video evidence | No unsupported 'passes on physical Mac' claims |
+
+**Critical discovered overlap:** #55 (based on #44) directly modifies `Packages/CineoScene/Package.swift`, `CineoSceneExporter.swift`, `CineoScenePlan.swift`, `CineoSceneSmoke/main.swift`, `CineoSceneSpike/main.swift` and its tests, which also exist in #50. **Never merge #50 and #55 wholesale**. Compare these paths and choose a single owner/version of scene evaluation before integration. #55 also edits `Apps/Cineo/Package.swift` and `CineoApp.swift`: only the serial integration owner can merge app entrypoint/build changes. #52 is a shell, not proof of a working preview.
+
+### Practical concurrency / same-repo policy
+
+- Keep **one existing Cineo repository**, the familiar on-Mac checkout and working directory, the existing SwiftPM/CLT toolchain, and a single designated integration branch. **No detach, no extra clone and no invented parallel working copies by default.**
+- On a **single working tree**, only one operator may switch branches or modify the root/app integration files at a time. Concurrent tasks may inspect, test, draft PR reviews and work in *disjoint owned paths*, coordinated with explicit file ownership; otherwise sequence their writes. Multiple simultaneous Git branches checked out in the same directory are technically impossible.
+- Existing **remote PR branches** above already provide isolated units of work. Review/reconcile them individually, then stage verified changes through one integration owner. Do not create replacement feature branches or duplicate work.
+- Capture/signing/build scripts are locked until G0; renderer/camera schemas locked until B + A agree; final app wiring is serial. If an agent needs a shared interface changed, write the contract and wait for the owner to ratify it before modifying another lane.
+
+### Priority order / handoff gates
+
+**Wave 0 — do in parallel now:** (1) Capture owner: test #44 with physical Mac, stable permission/rebuild and 3/10/60 s + back-to-back clips; (2) Renderer owner: diff #50 against #55 and compile only the chosen scene engine with CLT, validate a **real changed video**; (3) Project owner: run #49 with captured clip and check durability; (4) QA owner: run #54 against all candidates, collect evidence; (5) UX owner: review #55 on same Cineo Dev app, document usability failures without changing root files; (6) CLI owner: audit #53 command schemas and parity requirements. C independently tests geometry/timebase with synthetic cases.
+
+**Gate G1 — serialize minimal usable vertical slice:** after #44 capture passes, integrate canonical A+B+actual #55 editor+F through **one** Cineo Dev entrypoint. Play real source, edit style and one focus zoom, preview actual frames, export new MP4 with observable change, reopen the edit without corruption. Do not require C, E, auto AI or audio to reach this gate.
+
+**Wave 1 — run in parallel after G1:** C integrates event adapters and real click alignment; D integrates accept/reject/regenerate-preserving-manual-override into G1 editor; E joins the same project+scene service (no new exporter); F extends corpus/visual parity tests. All contributions remain package-scoped or under integration-owner review.
+
+**Gate G2:** render true synchronized click-driven suggestions and no-click fallback; user can correct/reject them; persist after closing/reopening; never erase manual intent.
+
+**Gate G3:** CLI and GUI evaluate the same saved edit and yield equivalent camera composition/timing with correct progress/cancel/error semantics.
+
+**Gate G4:** complete representative desktop/dense form/product walkthrough in both 16:9 and 9:16. Test 5 real demo authors; initial go/no-go targets: at least 4/5 find first-cut framing useful, under 3 minutes of manual edits for a 60 s deliverable, 10 complete record/edit/export cycles without blocker. Targets are hypotheses to validate, not proven performance.
+
+### Reporting contract: progress visible to the user
+
+For each PR/track, keep one status record with **owner, existing branch, exact HEAD, stage (not started / coding / CLT verified / Mac verified / integration / blocked), last command, latest passing evidence, output video/frame artifact, blocker and next action**. Report separately:
+- `build_progress`: actual stage (resolve → compile → bundle/sign → launch), not fabricated percentages.
+- `render_progress`: completed/total frames, MP4 verification and export path; cancellation cleans temporary file only.
+- `capture_progress`: elapsed recorded time and bytes, then finalization state; do not show fake percent for unbounded live recording.
+- `test_progress`: N passed / N failed / N skipped per gate, plus explicitly manual Mac work.
+
+No parallel worker may assert completion solely from green Swift unit tests; G1 requires an actually modified and playable MP4 on a physical Mac. Final merge remains separate from planning approval and must wait for verified results.
