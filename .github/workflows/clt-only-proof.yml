@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 20
     env:
       DEVELOPER_DIR: /Library/Developer/CommandLineTools
-      CINEO_CLT_PROOF_OUTPUT: ${{ runner.temp }}/cineo-clt-proof
+      CINEO_CLT_PROOF_OUTPUT: ${{ github.workspace }}/.clt-proof
     steps:
       - uses: actions/checkout@v4
       - name: Verify CLT-only environment
