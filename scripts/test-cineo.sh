@@ -13,7 +13,8 @@ Cineo macOS tests — default build uses CLT + SwiftPM, no Xcode.app
   bash scripts/test-cineo.sh --preflight    Check macOS Command Line Tools.
   bash scripts/test-cineo.sh --quick        Run CLT smoke for Director/Project/Timeline.
   bash scripts/test-cineo.sh --native       Compile Cineo Capture Alpha using CLT.
-  bash scripts/test-cineo.sh --interactive  Build + open local ad-hoc-signed Cineo.
+  bash scripts/test-cineo.sh --interactive  Build + open certificate-signed Cineo.
+  bash scripts/test-cineo.sh --signing     Set up/check the persistent Mac Keychain identity.
   bash scripts/test-cineo.sh --isolated-capture
                                            Build + launch distinctly named Stop Fix candidate.
   bash scripts/test-cineo.sh --exports --landscape "/path/video16x9.mp4"
@@ -77,7 +78,7 @@ interactive() {
   if [[ "${CINEO_CLT_ISOLATED_CAPTURE:-0}" == "1" ]]; then
     app_name="Cineo Stop Fix.app"
   fi
-  local app="${CINEO_CLT_BUILD_ROOT:-${TMPDIR:-/tmp}/cineo-clt-native}/$app_name"
+  local app="${CINEO_CLT_BUILD_ROOT:-$HOME/Library/Application Support/Cineo/Builds}/$app_name"
   [[ -x "$app/Contents/MacOS/Cineo" ]] || fail "Expected Cineo executable missing: $app"
   if [[ "${CINEO_CLT_ISOLATED_CAPTURE:-0}" == "1" ]]; then
     local bundle_id
@@ -89,6 +90,8 @@ interactive() {
   # LaunchServices may otherwise activate an already-running Cineo.app
   # from a previous build (same CFBundleIdentifier) instead of this build.
   # -n forces a fresh process; -a selects the exact just-built bundle path.
+  # A persistent certificate and stable bundle ID preserve Screen Recording
+  # consent after the initial macOS grant, even across subsequent rebuilds.
   echo "Launching a NEW Cineo process from: $app"
   echo "Quit any earlier Cineo window to avoid recording with the wrong build."
   open -n -a "$app"
@@ -175,6 +178,7 @@ case "$MODE" in
   --quick) (( $# == 0 )) || fail "Unexpected arguments"; quick ;;
   --native) (( $# == 0 )) || fail "Unexpected arguments"; native ;;
   --interactive) (( $# == 0 )) || fail "Unexpected arguments"; interactive ;;
+  --signing) (( $# == 0 )) || fail "Unexpected arguments"; require_mac; bash scripts/ensure-cineo-signing.sh ;;
   --isolated-capture) (( $# == 0 )) || fail "Unexpected arguments"; export CINEO_CLT_ISOLATED_CAPTURE=1; interactive ;;
   --legacy-orbit-native) (( $# == 0 )) || fail "Unexpected arguments"; legacy_orbit_native ;;
   --legacy-orbit-interactive) (( $# == 0 )) || fail "Unexpected arguments"; legacy_orbit_interactive ;;
