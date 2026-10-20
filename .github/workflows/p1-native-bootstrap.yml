@@ -7,11 +7,13 @@ on:
       - 'scripts/cineo_native_overlay.py'
       - '.github/workflows/p1-native-bootstrap.yml'
       - 'docs/decisions/**'
+      - 'scripts/native-smoke-doctor.sh'
   push:
     branches: [main]
     paths:
       - 'scripts/bootstrap-native.sh'
       - 'scripts/cineo_native_overlay.py'
+      - 'scripts/native-smoke-doctor.sh'
       - '.github/workflows/p1-native-bootstrap.yml'
   workflow_dispatch:
 
@@ -36,6 +38,10 @@ jobs:
           bash scripts/bootstrap-native.sh --plan
       - name: Compile isolated Cineo bundle
         run: bash scripts/bootstrap-native.sh --build
+      - name: Check compiled bundle metadata (not capture)
+        run: |
+          bash -n scripts/native-smoke-doctor.sh
+          bash scripts/native-smoke-doctor.sh --app ".cineo-build/DerivedData/Build/Products/Debug/Cineo.app" --allow-unsigned
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
