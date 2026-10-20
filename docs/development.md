@@ -1,14 +1,30 @@
 # Developing Cineo — current environment contract
 
-**Stage:** conditional Orbit-based P1 native prototype. Cineo produces an **unsigned staging Cineo.app** through its pinned bootstrap; this is not an integrated, signed, tested recording product. The inherited template material remains until issue #2 is completed.
-
+**Stage:** CLT-first **Cineo Capture Alpha** now builds from `Apps/Cineo` with SwiftPM and Apple's Command Line Tools, without Xcode.app. It compiles, creates an ad-hoc-signed bundle and contains an actual ScreenCaptureKit capture implementation; live TCC/recording must still be tested on a physical Mac. The fuller **Orbit-derived editor/Smart Zooms** currently remains an explicitly marked legacy Xcode-dependent reference, not yet incorporated into this CLT app. See [ADR-0002](decisions/0002-xcode-free-build.md) and [issue #39](https://github.com/daniele21/cineo/issues/39).
 ## Current runnable commands
+
+**Default local workflow (no Xcode.app required):**
+
+```bash
+bash scripts/test-cineo.sh --preflight
+bash scripts/test-cineo.sh --quick
+bash scripts/test-cineo.sh --native
+bash scripts/test-cineo.sh --interactive
+```
+
+The `--native` command invokes `scripts/build-cineo-clt.sh`, and `--interactive` opens an ad-hoc-signed local recorder. `--quick` on macOS uses a **limited executable smoke test** instead of Swift Testing macros (which are unreliable on certain CLT versions); full Swift regression suites remain in Linux CI. Do not claim that current Capture Alpha supports an Orbit timeline or Smart Zooms.
+
+**Legacy reference only:** `bash scripts/test-cineo.sh --legacy-orbit-native` and `--legacy-orbit-interactive` require Xcode 26+. Their separate [legacy CI](../.github/workflows/p1-native-bootstrap.yml) does not run for changes to the preferred CLT build entry point.
+
+The old table below documents commands for independently reproducing earlier source audits and Orbit builds, **not requirements for developing the current Cineo Capture Alpha**.
+
 
 | Intent | Command | Evidence |
 | --- | --- | --- |
 | Environment diagnosis | `bash scripts/doctor.sh` | Host OS, Swift, Xcode presence |
 | Pure camera prototype build | `swift build --package-path Packages/CineoDirector` | Swift package only; not macOS capture |
-| Project persistence/time mapper tests | `swift test --package-path Packages/CineoProject` | Schema/timeline logic, cross-platform (once merged) |\n| Pure camera tests | `swift test --package-path Packages/CineoDirector` | Camera planner logic, cross-platform |
+| Project persistence/time mapper tests | `swift test --package-path Packages/CineoProject` | Schema/timeline logic, cross-platform (Swift Testing Linux CI) |
+| Pure camera tests | `swift test --package-path Packages/CineoDirector` | Camera planner logic, cross-platform |
 | Inspect upstream benchmark targets | `bash scripts/benchmark-upstreams.sh --list` | Pinned versions and planned Mac build commands |
 | Fetch/compile selected upstream | `bash scripts/benchmark-upstreams.sh --run orbit` | macOS + Xcode 26 + network required |
 | Fetch/compile CineScreen | `bash scripts/benchmark-upstreams.sh --run cinescreen` | macOS, XcodeGen and Metal toolchain may be needed |
