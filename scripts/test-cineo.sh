@@ -80,7 +80,9 @@ interactive() {
   if [[ -n "${CINEO_CLT_BUILD_ROOT:-}" && "$CINEO_CLT_BUILD_ROOT" != "$canonical_root" ]]; then
     fail "Interactive capture requires the canonical ~/Applications app. Unset CINEO_CLT_BUILD_ROOT (it is only for --native and CI)."
   fi
-  unset CINEO_CLT_BUILD_ROOT
+  # Never allow a custom stage path inside Applications to register a
+  # second, ephemeral Cineo Dev.app with LaunchServices.
+  unset CINEO_CLT_BUILD_ROOT CINEO_CLT_STAGE_HOME CINEO_CLT_ISOLATED_CAPTURE
   if [[ "${CINEO_SIGNING_MODE:-persistent}" != "persistent" ]]; then
     fail "Interactive capture requires persistent Keychain signing; unset CINEO_SIGNING_MODE."
   fi
