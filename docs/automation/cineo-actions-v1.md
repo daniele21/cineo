@@ -18,17 +18,18 @@ Try the versioned [sample configuration](../examples/cineo-actions-v1.json) with
 | `stage.aspect` | `"16:9"` or `"9:16"` | Output canvas |
 | `stage.background` | `"dark"`, `"black"`, `"light"` | Uses the same Cineo Studio color preset |
 | `stage.padding` | number from 0 inclusive to 0.35 exclusive | Fraction of output canvas reserved for stage margins |
-| `actions` | array of at most 200 action objects | V1 only supports `camera.zoom`. Use an empty array for a stage-only edit |
+| `actions` | array of at most 200 action objects | Supports `camera.zoom` shots or `camera.keyframe` exact timeline edits (do not mix) |
 | `actions[].id` | unique nonempty ASCII id, max 80 chars | Letters, digits, `-`, `_`; shown as a navigation marker |
-| `actions[].type` | `"camera.zoom"` | No other types currently accepted |
-| `actions[].start`, `end` | number, seconds | Start/end of the complete zoom-in, hold, zoom-out shot, 0 ≤ start < end ≤ source duration |
+| `actions[].type` | `"camera.zoom"` or `"camera.keyframe"` | Descriptive shot or 1:1 manual keyframe |
+| `actions[].start`, `end` | numbers (seconds), zoom only | Start/end of the complete zoom-in / hold / zoom-out shot |
 | `actions[].target.x`, `y` | numbers in [0,1] | Focus point in original recorded content, origin at top-left |
-| `actions[].scale` | number in [1.01,2.5] | 1 is unzoomed; a zoom action must be greater than 1 |
-| `actions[].transition.in`, `out` | numbers ≥ 0.05 s | Zoom-in/out duration; at least 0.05 s hold between them |
+| `actions[].scale` | 1.01–2.5 for zoom, 1–3 for keyframe | 1 = no zoom |
+| `actions[].transition.in`, `out` | numbers ≥ 0.05 s, zoom only | Time to enter/leave zoom, at least 0.05 s hold |
+| `actions[].time` | number (seconds), keyframe only | Exact time 0…duration; times must increase strictly |
 
-All properties other than the optional `stage` and its fields are mandatory. Actions can be provided in arbitrary order; the compiler sorts them by start time. **Zoom intervals may not overlap or touch** in v1. Exact duplicates or invalid field names are rejected; unsupported action types/unknown fields are never silently discarded. Inputs over 1 MB, invalid types, out-of-bounds time, focus/zoom, duplicate identifiers or corrupt JSON are rejected **before changing the current edit**.
+Root fields `version`, `timebase` and `actions` are mandatory; `stage` is optional. Each action type has strictly validated fields and no unknown fields may be present. The importer sorts actions by time. Zoom intervals may not overlap or touch, and keyframes and zooms cannot be mixed in v1. Bad input is rejected before applying any edits.
 
-For each zoom shot, the compiler creates **four actual camera keyframes**: `start` (overview), `start + transition.in` (zoomed focal point), `end - transition.out` (zoom hold), `end` (overview). Existing CineoScene easing interpolates between keyframes. No separate exporter, special syntax runtime, or fake preview is created.
+Each `camera.zoom` compiles to four camera keyframes (overview, focus, hold, overview). Each `camera.keyframe` compiles to exactly one timeline keyframe at the specified time, focus and scale. Both render through the existing CineoScene engine.
 
 ## Studio workflow
 
@@ -43,5 +44,34 @@ For each zoom shot, the compiler creates **four actual camera keyframes**: `star
 
 - Current preview is frame-at-a-time: animated playback and editor/export visual parity remain independently gated work.
 - No `cursor.highlight`, `text.callout`, `trim`, `speed`, audio edits, arbitrary scripting, AI interpretations, click-derived anchors, multi-clip timelines, or overlapping zooms. Sending these action types is a **validation error**, not an ignored request.
-- Imported actions replace the existing camera keyframes **only with user approval**. Stage settings absent from the import are kept. Studio manual edits after import are ordinary scene keyframes; the original declarative JSON is not yet auto-updated or exported.
+- Imported actions replace current camera keyframes only after explicit confirmation. Missing stage properties keep their prior values. After editing visually, **Mostra istruzioni** regenerates equivalent exact keyframe JSON, available via Copy/Save; it does not attempt to reconstruct descriptive zoom boundaries or original imported labels.
 - Source media stays unchanged, and there is no arbitrary code execution. Future schema revisions require versioned migrations and CLI/UI parity tests.
+
+
+## Studio: Mostra istruzioni — the equivalent JSON dialog
+
+The **Mostra istruzioni** button opens a dialog with three tabs:
+
+- **Montaggio attuale:** actual current stage and every manually edited camera keyframe in versioned, importable JSON; use **Copia JSON** or **Salva JSON…**.
+- **Guida:** supported types and fields, timelines, normalized coordinate ranges, validation and unsupported effects.
+- **Esempi:** one complete `camera.zoom` shot and one direct `camera.keyframe` animation.
+
+The dialog is read-only to avoid creating a competing edit model. Edit the timeline in Studio or edit a saved `.json` file in an external text editor, then use **Importa istruzioni…** to apply it.
+
+### Exact camera.keyframe example
+
+```json
+{
+  "version": 1,
+  "timebase": "output",
+  "stage": {"aspect":"16:9", "background":"dark", "padding":0.06},
+  "actions": [
+    {"id":"overview", "type":"camera.keyframe", "time":0,
+     "target":{"x":0.5,"y":0.5}, "scale":1},
+    {"id":"focus", "type":"camera.keyframe", "time":3,
+     "target":{"x":0.8,"y":0.3}, "scale":1.8}
+  ]
+}
+```
+
+The importer enforces exactly the same `CineoScenePlan` evaluation after exporting and reimporting. For fidelity, the exact export uses keyframes even if the editing began as descriptive `camera.zoom` actions. Unsupported custom canvases, colors, more than 200 camera keyframes or points beyond the video duration produce an explicit error, not an approximate configuration. The current frame-at-a-time preview remains distinct from future Play/Pause.
