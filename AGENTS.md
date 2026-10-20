@@ -27,7 +27,8 @@ When generic inherited contracts conflict with product-specific requirements, pr
 
 ## Upstream reuse and licenses
 
-- **Conditional P1 staging base**: diip3sh/orbit at pinned SHA `219c4c8ad9965229aa84271c5201b1b8ad26eb7a`, per `docs/decisions/0001-native-foundation.md`. Real signed capture and export validation are still blocked.
+- **Default native application:** `Apps/Cineo`, built with SwiftPM and Apple Command Line Tools (no Xcode.app) using `scripts/test-cineo.sh --native|--interactive`. ScreenCaptureKit Capture Alpha only; real TCC/MP4 tests pending.
+- **Legacy editor reference:** diip3sh/orbit at pinned SHA `219c4c8ad9965229aa84271c5201b1b8ad26eb7a`, per `docs/decisions/0001-native-foundation.md`. Its Xcode build and Smart Zooms editor remain behind explicit `--legacy-orbit-*` commands until ported. Do not represent them as features of `Apps/Cineo`.
 - Other evaluation references: jsattler/BetterCapture, jasonzh0/CineScreen, getopenscreen/openscreen.
 - Do not copy ArcShot or AGPL-derived source just because it is readable; read exact source license/dependencies/asset notices and evaluate distribution consequences.
 - Maintain provenance ledger (upstream, SHA, original path, license, copyright, changes, tests) before every imported source module.
@@ -39,12 +40,12 @@ When generic inherited contracts conflict with product-specific requirements, pr
 - In **iteration**, run focused logic/tests and an affected native compile when available.
 - At **integration**, review full changes, prove the affected end-to-end user flow and attach screenshots/continuous video for visible UX changes.
 - At **release**, verify all quality gates including real-Mac capture, signing/notarization, permission behaviour, privacy and source preservation.
-- Use Mac Apple Silicon runner for Xcode workflows when configured. Do not invent green CI evidence or assert that local builds were run without actual output.
+- Use CLT-only macOS CI for all changes to `Apps/Cineo` and default test runner. Legacy Xcode CI is optional and limited to pinned Orbit compatibility. Do not invent green CI evidence or assert that local builds were run without actual output.
 
 ## Current gate: P1, with P2/P3 independent package spikes
 
-1. Verify the pinned Orbit-to-Cineo bootstrap compiles and the unsigned metadata checks pass.
-2. On a signed physical Mac complete `docs/testing/native-smoke.md` for TCC, capture, audio, editor and export before declaring native app features working.
+1. Verify SwiftPM `Apps/Cineo` builds with `DEVELOPER_DIR=/Library/Developer/CommandLineTools` and an ad-hoc `.app` is created. The old Orbit staging is a separate compatibility suite.
+2. On a real Mac run `scripts/test-cineo.sh --interactive`; confirm TCC approval and a playable MP4. Do not claim audio, editor, or Smart Zooms for this Capture Alpha; those remain migration tasks #39.
 3. Independently improve pure Swift `CineoDirector` and `CineoProject` logic with tests; do not claim these are wired into the native app.
 4. Keep inherited template validation marked as legacy engineering checks rather than app-level E2E.
 
