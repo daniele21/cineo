@@ -119,7 +119,7 @@ final class CineoEditorModel: ObservableObject {
                 return
             }
             duration = t.seconds
-            let fps = Double(try await track.load(.nominalFrameRate))
+            let fps = Double((try? await track.load(.nominalFrameRate)) ?? 30)
             sourceFrameRate = fps.isFinite && fps > 1 && fps <= 240 ? fps : 30
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
@@ -570,7 +570,8 @@ final class CineoEditorModel: ObservableObject {
                 displayedFrameCount += 1
                 let now = ProcessInfo.processInfo.systemUptime
                 if now - displayedFrameWindowStart >= 1 {
-                    previewActualFPS = displayedFrameCount
+                    previewActualFPS = Int((Double(displayedFrameCount) /
+                        (now - displayedFrameWindowStart)).rounded())
                     displayedFrameCount = 0
                     displayedFrameWindowStart = now
                 }
