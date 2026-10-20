@@ -55,6 +55,34 @@ The macOS unified logging subsystem is `com.daniele21.cineo.capturealpha`, categ
 
 CLT GitHub Actions verifies **compilation and bundle signing** only. It cannot demonstrate Screen Recording permission prompts, ScreenCaptureKit delegate delivery, stop behavior or a real MP4. These need a physical Mac smoke. If stuck in `Finalizing MP4`, note the time and latest Activity log lines and check `~/Movies/Cineo/`; source material is not deleted by the app.
 
+## Diagnosing an old Cineo process
+
+When a test still logs `Stop requested. Asking ScreenCaptureKit to finalize output.`
+or `Recording output removed`, it is **not** running the fixed recorder:
+these messages exist on `main` but not in this branch.
+
+The CLT build now stamps its exact 12-character source commit and capture
+implementation into the signed `Info.plist`. The app displays `SOURCE <sha>
+• PID <number>` and logs `Runtime identity: SOURCE=... PID=... BUNDLE=...`.
+The launcher refuses to run while *any* existing Cineo executable is active.
+It never force-quits another Cineo process, because that could interrupt a
+recording and lose media. Quit all existing Cineo windows with Command-Q
+and rerun from the intended checkout.
+
+To compare the source, signed binary, and process on the physical Mac:
+
+```bash
+git rev-parse --short=12 HEAD
+git grep -n 'Stop requested\.' -- Apps/Cineo/Sources/Cineo/CineoApp.swift
+APP="$HOME/Library/Application Support/Cineo/Builds/Cineo.app"
+/usr/libexec/PlistBuddy -c 'Print :CineoSourceCommit' "$APP/Contents/Info.plist"
+codesign --verify --strict "$APP"
+pgrep -alf Cineo || true
+```
+
+A green macOS CI build does not mean the Mac is running that build.
+The presence of a stale window invalidates runtime conclusions about fixes.
+
 ## Real-Mac regression for the stop/finalization race
 
 1. Use the dedicated candidate checkout and launch with `bash scripts/test-cineo.sh --isolated-capture` (CLT only, no Xcode.app). This builds a separately signed **Cineo Stop Fix.app** with bundle ID `com.daniele21.cineo.capturealpha.stopfix`; it leaves existing Cineo.app and its macOS permission identity untouched. The command checks bundle ID and prints the exact source HEAD before opening a fresh instance. macOS may request Screen Recording permission again for the new identity. Verify the new app shows **Capture fix candidate • stream-stop finalization** and logs **Build variant: stream-stop finalization**. If either marker is missing, the recording does not test this fix.
