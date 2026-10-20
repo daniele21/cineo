@@ -3,12 +3,12 @@ set -euo pipefail
 
 # P1 pinned native bootstrap. No imported upstream source is committed to Cineo.
 # --plan is read-only and works on Linux. --build requires macOS / Xcode.
-ROOT="\${CINEO_NATIVE_ROOT:-\${TMPDIR:-/tmp}/cineo-p1-native}"
+ROOT="${CINEO_NATIVE_ROOT:-${TMPDIR:-/tmp}/cineo-p1-native}"
 SHA="219c4c8ad9965229aa84271c5201b1b8ad26eb7a"
 URL="https://github.com/diip3sh/orbit.git"
 SRC="$ROOT/orbit"
 APP="$ROOT/DerivedData/Build/Products/Debug/Cineo.app"
-ACTION="\${1:---plan}"
+ACTION="${1:---plan}"
 
 case "$ACTION" in
   --plan)
