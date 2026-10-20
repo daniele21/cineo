@@ -302,6 +302,7 @@ final class CineoEditorModel: ObservableObject {
             return
         }
         let fx = focusX, fy = focusY
+        importedActionMarkers = [] // Camera recipe has diverged from imported action labels.
         keyframes.append(contentsOf: [
             .init(time: start, zoom: 1, focusX: 0.5, focusY: 0.5),
             .init(time: peak, zoom: 1.45, focusX: fx, focusY: fy),
@@ -322,6 +323,7 @@ final class CineoEditorModel: ObservableObject {
             return
         }
         keyframes.remove(at: index)
+        importedActionMarkers = []
         savePlan()
         status = "Keyframe rimosso; originale invariato."
         scrub(selectedTime)
@@ -342,6 +344,7 @@ final class CineoEditorModel: ObservableObject {
     }
 
     private func saveKeyframe() {
+        importedActionMarkers = []
         let frame = CineoCameraKeyframe(
             time: max(0, selectedTime), zoom: zoom,
             focusX: focusX, focusY: focusY
