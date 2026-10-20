@@ -1,0 +1,121 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "color": {
+    "ink": {
+      "$type": "color",
+      "$value": "#092D43"
+    },
+    "deep_ocean": {
+      "$type": "color",
+      "$value": "#0B4F6A"
+    },
+    "ocean": {
+      "$type": "color",
+      "$value": "#107C99"
+    },
+    "lagoon": {
+      "$type": "color",
+      "$value": "#29BED1"
+    },
+    "turquoise": {
+      "$type": "color",
+      "$value": "#55D2C8"
+    },
+    "mint": {
+      "$type": "color",
+      "$value": "#98EACD"
+    },
+    "frost": {
+      "$type": "color",
+      "$value": "#DDF6F0"
+    },
+    "mist": {
+      "$type": "color",
+      "$value": "#A4CDD0"
+    },
+    "cloud": {
+      "$type": "color",
+      "$value": "#F5FAF9"
+    },
+    "white": {
+      "$type": "color",
+      "$value": "#FFFFFF"
+    },
+    "muted": {
+      "$type": "color",
+      "$value": "#5B7180"
+    },
+    "outline": {
+      "$type": "color",
+      "$value": "#B8D9DA"
+    },
+    "navy": {
+      "$type": "color",
+      "$value": "#102639"
+    }
+  },
+  "radius": {
+    "sm": {
+      "$type": "dimension",
+      "$value": "8px"
+    },
+    "md": {
+      "$type": "dimension",
+      "$value": "12px"
+    },
+    "lg": {
+      "$type": "dimension",
+      "$value": "18px"
+    },
+    "xl": {
+      "$type": "dimension",
+      "$value": "24px"
+    },
+    "pill": {
+      "$type": "dimension",
+      "$value": "999px"
+    }
+  },
+  "fontFamily": {
+    "display": {
+      "$type": "fontFamily",
+      "$value": "Inter Display, Inter, sans-serif"
+    },
+    "body": {
+      "$type": "fontFamily",
+      "$value": "Inter, sans-serif"
+    }
+  },
+  "fontWeight": {
+    "regular": {
+      "$type": "fontWeight",
+      "$value": 400
+    },
+    "medium": {
+      "$type": "fontWeight",
+      "$value": 500
+    },
+    "semibold": {
+      "$type": "fontWeight",
+      "$value": 600
+    },
+    "bold": {
+      "$type": "fontWeight",
+      "$value": 700
+    }
+  },
+  "motion": {
+    "fast": {
+      "$type": "duration",
+      "$value": "140ms"
+    },
+    "base": {
+      "$type": "duration",
+      "$value": "220ms"
+    },
+    "slow": {
+      "$type": "duration",
+      "$value": "360ms"
+    }
+  }
+}
