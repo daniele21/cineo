@@ -52,6 +52,13 @@ case "$SIGNING_MODE" in
     exit 2
     ;;
 esac
+# Prevent overwriting a running .app whose process would keep executing
+# the old binary; never kill a recording process behind the user's back.
+if pgrep -x Cineo >/dev/null 2>&1; then
+  echo "Refusing to rebuild/install Cineo while a Cineo process is running." >&2
+  echo "Quit Cineo with Command-Q and retry; existing recordings are untouched." >&2
+  exit 2
+fi
 printf 'Building native Cineo with %s\n' "$(xcode-select -p)"
 swift --version
 xcrun --sdk macosx --show-sdk-path
