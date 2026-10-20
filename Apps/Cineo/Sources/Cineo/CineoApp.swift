@@ -78,6 +78,9 @@ private struct CaptureDashboard: View {
                     Text("Cineo").font(.title.bold())
                     Text("Local-first screen capture • SwiftPM + Command Line Tools")
                         .foregroundStyle(.secondary)
+                    Text("Capture fix candidate • stream-stop finalization")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             Divider()
@@ -241,6 +244,7 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
     override init() {
         super.init()
         log("Ready. Nothing is being recorded.")
+        log("Build variant: stream-stop finalization (fix/screencapture-stop-finalization-race).")
     }
 
     private var recordingsDirectory: URL {
