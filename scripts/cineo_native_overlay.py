@@ -32,7 +32,8 @@ def apply_overlay(root: Path) -> None:
     repo_root = Path(__file__).resolve().parent.parent
     camera_source = repo_root / "Packages" / "CineoDirector" / "Sources" / "CineoDirector" / "CameraPlanner.swift"
     bridge_source = repo_root / "native" / "OrbitIntegration" / "CineoAutoZoomBridge.swift"
-    for extra in (zoom_file, editor_project_file, camera_source, bridge_source):
+    bridge_tests = repo_root / "native" / "OrbitIntegration" / "CineoAutoZoomBridgeTests.swift"
+    for extra in (zoom_file, editor_project_file, camera_source, bridge_source, bridge_tests):
         if not extra.is_file():
             raise FileNotFoundError(f"Cineo camera integration file missing: {extra}")
     for path in (project, info_file, main_file, app_file, delegate_file, root / "LICENSE"):
@@ -55,6 +56,14 @@ def apply_overlay(root: Path) -> None:
         raise ValueError("Unsafe upstream drift: signing team layout changed")
     pbx = pbx.replace(team, 'DEVELOPMENT_TEAM = "";')
     # Never ship Orbit's icon as a Cineo brand identity.
+    # App product name can differ from its Swift import module. Upstream
+    # @testable import Reco stays valid while bundled app is called Cineo.
+    app_product_line = "PRODUCT_NAME = Cineo;\\n\\t\\t\\t\\tREGISTER_APP_GROUPS = YES;"
+    module_line = "PRODUCT_NAME = Cineo;\\n\\t\\t\\t\\tPRODUCT_MODULE_NAME = Reco;\\n\\t\\t\\t\\tREGISTER_APP_GROUPS = YES;"
+    pbx = replace_exact(pbx, app_product_line, module_line, 2)
+    old_test_host = 'TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Reco.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Reco";'
+    new_test_host = 'TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cineo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cineo";'
+    pbx = replace_exact(pbx, old_test_host, new_test_host, 2)
     pbx = replace_exact(pbx, "ASSETCATALOG_COMPILER_APPICON_NAME = Reco;",
                         'ASSETCATALOG_COMPILER_APPICON_NAME = "";', 2)
 
@@ -109,6 +118,7 @@ def apply_overlay(root: Path) -> None:
     staging_service = root / "Reco" / "Editor" / "Service"
     (staging_service / "CineoCameraPlanner.swift").write_text(director)
     shutil.copy2(bridge_source, staging_service / "CineoAutoZoomBridge.swift")
+    shutil.copy2(bridge_tests, root / "RecoTests" / "CineoAutoZoomBridgeTests.swift")
 
     print(f"Applied Cineo P1 overlay for {BUNDLE_ID} to {root}")
     print("Source license retained. Upstream migration, app updater, URL handler and agent bridge disabled.")
