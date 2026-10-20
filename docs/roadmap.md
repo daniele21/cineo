@@ -13,6 +13,12 @@
 - Mark code/migrations honestly: template files currently present in Cineo are **not** evidence of a working Swift app.
 - Suggested effort levels are relative (S/M/L/XL), **not time commitments**.
 
+## Execution status as of 2026-10-20
+
+**P0 architecture selection is conditionally accepted for P1 experimentation** under [ADR-0001](decisions/0001-native-foundation.md). A three-candidate macOS/Xcode build matrix passed, and the pinned Orbit-based unsigned Cineo staging build passed identity/exec checks. This is a deliberately narrower P0 **selection** gate than the original interactive-media benchmark below: the unperformed signed capture, TCC, real export, media-quality comparison and complete third-party art license review were **not passed or waived for delivery**; they are moved to mandatory **P1-GATE-A–E** before calling the native workflow validated.
+
+The old P0 engineering-template migration work remains open as P1 repository cleanup. [Issue #3](https://github.com/daniele21/cineo/issues/3) tracks the next real native capture-to-file milestone. This note does not claim Cineo is distributable.
+
 ## Critical path
 
 | Milestone | Outcome | Main deliverable | Depends on | Exit gate |
@@ -102,7 +108,7 @@ Each issue has a vertical deliverable; codes can be used as issue titles and acc
 | ID | Title | Priority | Estimate | Dependencies |
 | --- | --- | --- | --- | --- |
 | [CINEO-001](https://github.com/daniele21/cineo/issues/1) | Audit native upstream builds, module maturity and licensing | P0 | L | — |
-| [CINEO-002](https://github.com/daniele21/cineo/issues/2) | Adapt starter engineering baseline to Cineo | P0 | M | — |
+| [CINEO-002](https://github.com/daniele21/cineo/issues/2) | Finish native Cineo engineering-baseline migration | P1 | M | P0 selection |
 | [CINEO-003](https://github.com/daniele21/cineo/issues/3) | Create native Cineo capture-to-file vertical slice | P1 | L | 001, 002 |
 | [CINEO-004](https://github.com/daniele21/cineo/issues/4) | Time-synchronized cursor/click sidecar | P1/P2 | M | 003 |
 | [CINEO-005](https://github.com/daniele21/cineo/issues/5) | Versioned, crash-safe project and undoable edit model | P2 | L | 003 |
