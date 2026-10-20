@@ -49,7 +49,9 @@ jobs:
           xcodebuild -project "$CINEO_NATIVE_ROOT/orbit/Reco.xcodeproj" \
             -scheme Reco -configuration Debug -destination 'platform=macOS' \
             -derivedDataPath "$CINEO_NATIVE_ROOT/DerivedData" \
-            -parallel-testing-enabled NO -only-testing:RecoTests/CineoAutoZoomBridgeTests \
+            -parallel-testing-enabled NO \
+            -only-testing:RecoTests/CineoAutoZoomBridgeTests \
+            -only-testing:RecoTests/CineoCameraMotionTests \
             CODE_SIGNING_ALLOWED=NO test \
             2>&1 | tee "$CINEO_NATIVE_ROOT/logs/cineo-bridge-tests.log"
       - name: Check compiled bundle metadata (not capture)
