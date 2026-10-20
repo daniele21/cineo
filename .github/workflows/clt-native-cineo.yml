@@ -12,7 +12,6 @@ on:
       - 'Packages/CineoEditPlanner/**'
       - 'scripts/build-cineo-clt.sh'
       - 'scripts/ensure-cineo-signing.sh'
-      - 'scripts/ensure-cineo-signing.sh'
       - '.github/workflows/clt-native-cineo.yml'
   push:
     branches: [main]
@@ -25,6 +24,7 @@ on:
       - 'Packages/CineoProject/**'
       - 'Packages/CineoEditPlanner/**'
       - 'scripts/build-cineo-clt.sh'
+      - 'scripts/ensure-cineo-signing.sh'
       - '.github/workflows/clt-native-cineo.yml'
   workflow_dispatch:
 
