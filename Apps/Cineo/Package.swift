@@ -6,11 +6,13 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [.executable(name: "Cineo", targets: ["Cineo"])],
     dependencies: [
-        .package(path: "../../Packages/CineoScene")
+        .package(path: "../../Packages/CineoScene"),
+        .package(path: "../../Packages/CineoProject")
     ],
     targets: [
         .executableTarget(name: "Cineo", dependencies: [
-            .product(name: "CineoScene", package: "CineoScene")
+            .product(name: "CineoScene", package: "CineoScene"),
+            .product(name: "CineoProject", package: "CineoProject")
         ])
     ]
 )
