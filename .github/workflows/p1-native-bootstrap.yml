@@ -46,6 +46,13 @@ jobs:
         run: |
           bash -n scripts/test-cineo.sh
           bash scripts/test-cineo.sh --preflight
+          # Regression: Apple CommandLineTools shims must fail BEFORE clone.
+          if env DEVELOPER_DIR=/Library/Developer/CommandLineTools \
+            bash scripts/test-cineo.sh --preflight > "$RUNNER_TEMP/clt-preflight.log" 2>&1; then
+            echo "FAIL: CLT-only configuration was unexpectedly accepted" >&2
+            exit 1
+          fi
+          grep -F 'Full Xcode is not selected' "$RUNNER_TEMP/clt-preflight.log"
           bash scripts/test-cineo.sh --help
       - name: Compile isolated Cineo bundle
         run: bash scripts/bootstrap-native.sh --build
