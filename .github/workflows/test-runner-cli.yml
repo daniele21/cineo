@@ -1,0 +1,35 @@
+name: Cineo test runner CLI contract
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/test-cineo.sh'
+      - '.github/workflows/test-runner-cli.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/test-cineo.sh'
+      - '.github/workflows/test-runner-cli.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cli-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate test runner shell syntax
+        run: bash -n scripts/test-cineo.sh
+      - name: Help and safe Linux rejection of native commands
+        run: |
+          set -euo pipefail
+          bash scripts/test-cineo.sh --help | grep -F -- '--interactive'
+          bash scripts/test-cineo.sh --help | grep -F -- '--exports'
+          if bash scripts/test-cineo.sh --native; then
+            echo "FAIL: native tests must not run on non-macOS hosts" >&2
+            exit 1
+          fi
+          echo "PASS: native work refused on Linux."
