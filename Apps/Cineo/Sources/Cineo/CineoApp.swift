@@ -94,7 +94,7 @@ private struct CaptureDashboard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Cineo")
                         .font(CineoBrand.displayFont(size: 29))
-                        .foregroundStyle(CineoBrand.ink)
+                        .foregroundStyle(.primary) // Auto-adapts brand headline for macOS Dark Mode
                     Text("Il focus su ciò che conta.")
                         .font(CineoBrand.bodyFont(size: 13))
                         .foregroundStyle(CineoBrand.muted)
