@@ -35,7 +35,8 @@ def apply_overlay(root: Path) -> None:
     preset_source = repo_root / "Packages" / "CineoDirector" / "Sources" / "CineoDirector" / "CameraPreset.swift"
     bridge_source = repo_root / "native" / "OrbitIntegration" / "CineoAutoZoomBridge.swift"
     bridge_tests = repo_root / "native" / "OrbitIntegration" / "CineoAutoZoomBridgeTests.swift"
-    for extra in (zoom_file, editor_project_file, editor_view_file, camera_source, preset_source, bridge_source, bridge_tests):
+    motion_tests = repo_root / "native" / "OrbitIntegration" / "CineoCameraMotionTests.swift"
+    for extra in (zoom_file, editor_project_file, editor_view_file, camera_source, preset_source, bridge_source, bridge_tests, motion_tests):
         if not extra.is_file():
             raise FileNotFoundError(f"Cineo camera integration file missing: {extra}")
     for path in (project, info_file, main_file, app_file, delegate_file, root / "LICENSE"):
@@ -168,6 +169,7 @@ def apply_overlay(root: Path) -> None:
     (staging_service / "CineoCameraPreset.swift").write_text(preset_code)
     shutil.copy2(bridge_source, staging_service / "CineoAutoZoomBridge.swift")
     shutil.copy2(bridge_tests, root / "RecoTests" / "CineoAutoZoomBridgeTests.swift")
+    shutil.copy2(motion_tests, root / "RecoTests" / "CineoCameraMotionTests.swift")
 
     print(f"Applied Cineo P1 overlay for {BUNDLE_ID} to {root}")
     print("Source license retained. Upstream migration, app updater, URL handler and agent bridge disabled.")
