@@ -25,6 +25,7 @@ struct CineoApp: App {
                     }
                 }
             }
+            .tint(CineoBrand.ocean)
         }
         .windowResizability(.contentSize)
     }
@@ -89,11 +90,14 @@ private struct CaptureDashboard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
-                Image(systemName: "record.circle")
-                    .font(.system(size: 32))
+                CineoBrandSymbol(size: 54)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Cineo").font(.title.bold())
-                    Text("Local-first screen capture • SwiftPM + Command Line Tools")
+                    Text("Cineo")
+                        .font(CineoBrand.displayFont(size: 29))
+                        .foregroundStyle(CineoBrand.ink)
+                    Text("Il focus su ciò che conta.")
+                        .font(CineoBrand.bodyFont(size: 13))
+                        .foregroundStyle(CineoBrand.muted)
                         .foregroundStyle(.secondary)
                     Text("Capture fix candidate • stream-stop finalization")
                         .font(.caption)
