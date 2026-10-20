@@ -1,0 +1,33 @@
+name: Cineo core smoke (no XCTest macros)
+
+on:
+  pull_request:
+    paths:
+      - 'Apps/CineoCLTSmoke/**'
+      - 'Packages/CineoDirector/**'
+      - 'Packages/CineoProject/**'
+      - 'Packages/CineoEditPlanner/**'
+      - '.github/workflows/clt-core-smoke.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Apps/CineoCLTSmoke/**'
+      - 'Packages/CineoDirector/**'
+      - 'Packages/CineoProject/**'
+      - 'Packages/CineoEditPlanner/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cross-platform-core-smoke:
+    name: Source camera, timeline, project and undo/redo smoke
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.2
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run CLT-compatible core smoke executable
+        run: swift run --package-path Apps/CineoCLTSmoke --configuration release cineo-clt-smoke
