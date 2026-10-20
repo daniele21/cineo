@@ -55,7 +55,7 @@ struct CameraPlannerTests {
     }
     @Test func equalTimestampOrderCannotChangeSuggestedShot() {
         let events = [
-            AttentionEvent(time: 1, x: 0.72, y: 0.4, kind: .click),
+            AttentionEvent(time: 1, x: 0.20, y: 0.6, kind: .click),
             AttentionEvent(time: 1, x: 0.24, y: 0.6, kind: .result),
             AttentionEvent(time: 1, x: 0.30, y: 0.6, kind: .result)
         ]
