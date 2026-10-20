@@ -61,6 +61,8 @@ jobs:
           test -x "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/MacOS/Cineo"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/Info.plist")" = com.daniele21.cineo.capturealpha
           codesign --verify --strict "$CINEO_CLT_BUILD_ROOT/Cineo.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CineoSourceCommit' "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/Info.plist")" = "$(git rev-parse --short=12 HEAD)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CineoCaptureImplementation' "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/Info.plist")" = "stream-stop-v2"
           echo "Native Cineo app packaged under standalone CLT."
       - name: Package distinctly identified Stop Fix candidate
         env:
