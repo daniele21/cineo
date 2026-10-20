@@ -93,6 +93,10 @@ def apply_overlay(root: Path) -> None:
     for declaration in ("AttentionEvent", "CameraShot", "CameraPlanner"):
         director = replace_exact(director, f"public struct {declaration}:",
                                  f"nonisolated public struct {declaration}:", 1)
+    # Orbit sets SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor; the helper
+    # extension must also be explicitly nonisolated for synchronous sorting.
+    director = replace_exact(director, "private extension AttentionEvent.Kind {",
+                             "nonisolated extension AttentionEvent.Kind {", 1)
     
     project.write_text(pbx)
     with info_file.open("wb") as stream:
