@@ -1,43 +1,57 @@
-# Cineo: prova sul tuo Mac con un solo script
+# Testare Cineo senza Xcode.app
 
-**Punto d'ingresso:** `scripts/test-cineo.sh` (dal repository, nella cartella principale).
+**Requisiti locali:** macOS 15+, Apple Command Line Tools installati (`xcode-select --install`), Swift e macOS SDK compresi nei CLT. **Non serve Xcode.app, né un account Apple Developer** per questa versione di acquisizione.
 
-## Preparazione
-
-Servono macOS con Xcode 26 o superiore, Swift, Python 3 e Git. Per il test interattivo serve una **identità Apple Development** configurata in Xcode; il Team ID rimane soltanto nel tuo ambiente.
+## Comandi predefiniti
 
 ```bash
-git clone https://github.com/daniele21/cineo.git
-cd cineo
+cd ~/Personal/cineo
+git switch main
+git pull --ff-only origin main
+
 bash scripts/test-cineo.sh --preflight
+bash scripts/test-cineo.sh --quick
+bash scripts/test-cineo.sh --native
+bash scripts/test-cineo.sh --interactive
 ```
 
-Se hai già clonato il repository, aggiorna prima il codice con `git pull --ff-only origin main` sulla copia di lavoro pulita.
-
-## Modalità
-
-| Cosa vuoi verificare | Comando | Cosa dimostra |
+| Comando | Cosa fa | Evidenza |
 | --- | --- | --- |
-| Toolchain | `bash scripts/test-cineo.sh --preflight` | Swift, Xcode, architettura, presenza identità di firma; non compila |
-| Logica indipendente | `bash scripts/test-cineo.sh --quick` | Test `CineoDirector`, `CineoProject`, `CineoEditPlanner` |
-| App nativa / geometria | `bash scripts/test-cineo.sh --native` | Recupera Orbit al commit fissato, applica overlay Cineo, compila **senza firma**, esegue test con eventi sintetici su Camera Director / CameraPath / TimeMap |
-| App funzionante da collaudare | `CINEO_APPLE_TEAM=YOUR10CHARID bash scripts/test-cineo.sh --interactive` | Compila e verifica firma locale, apre `Cineo.app` e mostra checklist; i test capture/export si eseguono manualmente |
-| MP4 esportati | `bash scripts/test-cineo.sh --exports --landscape "/path/to/16x9.mp4" --portrait "/path/to/9x16.mp4"` | Verifica localmente struttura file, H.264, dimensioni, durata; aggiungi `--require-audio` per richiedere una traccia audio |
+| `--preflight` | Controlla l'SDK CLT, Swift e la presenza del framework Testing | Diagnostica senza Xcode |
+| `--quick` | Su macOS esegue uno **smoke test eseguibile** di Camera Director, Project, Edit Planner e Undo/Redo senza macro Swift Testing; su Linux esegue le suite complete | Test unitari senza Xcode |
+| `--native` | Compila `Apps/Cineo` con SwiftPM, crea `Cineo.app` e la firma ad hoc | Build nativa senza `xcodebuild` |
+| `--interactive` | Ricompila la stessa app e la apre | **Test manuale** Screen Recording e MP4 |
+| `--exports` | Ispeziona un MP4 H.264 già esportato con AVFoundation | Codec/risoluzione/durata, non qualità percepita |
 
-`--native` può impiegare tempo la prima volta perché scarica il repository e le dipendenze al commit bloccato; il build viene preparato in una cartella temporanea indipendente da Cineo. **Non modificare il codice dentro lo staging:** il successivo bootstrap esegue un reset per mantenere la riproducibilità.
+`--native` e `--interactive` usano ora la **nuova Cineo Capture Alpha costruita senza Xcode**. Gli script basati su Orbit restano temporaneamente disponibili solo con `--legacy-orbit-native` e `--legacy-orbit-interactive` e richiedono Xcode completo: non utilizzarli per verificare l'architettura CLT-only.
 
-## Primo collaudo che raccomandiamo
+## Prima prova interattiva
 
-1. Esegui `--preflight`, quindi `--quick`.
-2. Lancia `--native` se vuoi verificare build, adattatore click → zoom, fluidezze matematiche e conversioni dei tagli. Non apre l'app.
-3. Quando vuoi provarla visivamente, usa `--interactive` con il tuo Team ID. Il comando `open` apre l'app firmata senza simulare i permessi del sistema. **Autorizza Screen Recording solo tramite l'interfaccia di macOS** e prova a registrare una finestra di test.
-4. Dal menu **Smart Zooms**, seleziona prima Subtle, poi Balanced, poi Dynamic; confronta inquadrature e conservazione degli zoom manuali.
-5. Esporta un file 1920×1080 e uno 1080×1920 H.264, poi passa i loro percorsi a `--exports`.
+1. Lancia `bash scripts/test-cineo.sh --interactive`. La compilazione usa `DEVELOPER_DIR=/Library/Developer/CommandLineTools`, `swift build` e `codesign --sign -`; non chiede account, Team ID o credenziali.
+2. Nell'app clicca **Record main display**. macOS potrà chiedere di autorizzare Screen Recording; segui l'UI di sistema ed eventualmente riavvia Cineo.
+3. Registra una schermata di test per 10–30 secondi, poi clicca **Stop recording**. Attendi la dicitura `MP4 finalized`.
+4. Clicca **Show recordings**. I file sono nella cartella `~/Movies/Cineo/`, senza upload o API.
+5. Apri il file con QuickTime o un altro lettore e verifica che sia riproducibile.
 
-Questi controlli non inviano video al cloud né leggono dati personali del tuo account. I controlli di movimento usano input sintetici. La modalità `--interactive` **non attesta automaticamente** la riuscita del video reale e un MP4 strutturalmente valido **non prova** sincronizzazione audio, nitidezza, flicker o crop corretto.
+**Limitazioni reali:** questa prima app cattura il display principale con cursore, 30 fps, H.264 MP4 e **non registra audio**. Non offre ancora l'editor Orbit né Smart Zooms; questi moduli esistono nel codice ma la loro UI/render integration appartiene ancora alla build legacy. L'uso di una firma ad hoc può causare nuove richieste TCC quando cambia il binario: non eliminare o aggirare le protezioni del sistema.
 
-Per il collaudo completo vedi [protocollo registrazione/edit/export](native-smoke.md), [sonda MP4](export-probe.md).
+### Verificare il file registrato
 
-### Se qualcosa non funziona
+Lo strumento preesistente di ispezione consente di controllare un output con dimensioni specifiche, per esempio:
 
-Condividi il nome della modalità, l'ultimo errore (senza credenziali né percorsi privati) e il nome dello step. I log di compilazione locali, se necessari, sono in `${CINEO_NATIVE_ROOT:-${TMPDIR:-/tmp}/cineo-p1-native}/logs/`. Evita di incollare l'intero log se include percorsi del computer o informazioni private.
+```bash
+bash scripts/test-cineo.sh --exports \
+  --landscape "$HOME/Movies/Cineo/IL-TUO-VIDEO.mp4"
+```
+
+La modalità `--exports` richiede esplicitamente 1920×1080 per il video landscape; **non usarla su risoluzioni diverse** finché non hai configurato un export a quel formato. Per il primo test della Capture Alpha è sufficiente aprire l'MP4 reale in QuickTime.
+
+## Swift Testing con CLT
+
+Su alcune installazioni di Command Line Tools SwiftPM non trova `Testing.framework` e il comando `swift test` fallisce con `no such module 'Testing'`. Il wrapper sperimentale `scripts/swift-test-clt.sh` rileva il framework e aggiunge i percorsi `-F` e `-rpath`, ma alcune versioni CLT non includono il **plugin `TestingMacros`**, necessario ai test con `@Test`. Per evitare di dipendere da Xcode, la modalità macOS `--quick` esegue per ora il programma `Apps/CineoCLTSmoke` con asserzioni vere e codice condiviso, senza `import Testing`. I test completi rimangono eseguiti in CI Linux; questo smoke non li sostituisce integralmente. La soluzione definitiva per le macro Swift Testing su CLT è ancora aperta.
+
+## Stato di verifica
+
+La CI macOS può verificare **compilazione**, firme ad hoc e uno smoke test degli algoritmi Swift senza macro con `DEVELOPER_DIR=/Library/Developer/CommandLineTools`. Non verifica permessi TCC, acquisizione reale, validità effettiva di un file prodotto dall'app o qualità video. Sono i test manuali da eseguire sul Mac fisico.
+
+Vedi [decisione CLT-only](../decisions/0002-xcode-free-build.md) e [test prodotto completo](native-smoke.md).
