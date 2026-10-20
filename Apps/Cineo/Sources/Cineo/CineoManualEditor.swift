@@ -23,6 +23,7 @@ final class CineoEditorModel: ObservableObject {
     @Published var sourcePixelHeight = 982
     @Published var mode: Mode = .manual
     @Published var duration: Double = 0
+    @Published var sourceFrameRate: Double = 30
     @Published var selectedTime: Double = 0
     @Published var zoom: Double = 1
     @Published var focusX: Double = 0.5
@@ -47,6 +48,8 @@ final class CineoEditorModel: ObservableObject {
 
     private var previewTask: Task<Void, Never>?
     private var previewRequest = UUID()
+    private var previewGenerator: AVAssetImageGenerator?
+    private let previewCIContext = CIContext()
     private var exportTask: Task<Void, Never>?
 
     var outputWidth: Int { portrait ? 1080 : 1920 }
@@ -68,6 +71,7 @@ final class CineoEditorModel: ObservableObject {
         guard !isExporting && !isSavingProject else { return }
         status = "Caricamento del video o progetto…"
         previewTask?.cancel()
+        previewGenerator = nil
         preview = nil
         sourceURL = nil
         projectURL = nil
@@ -104,6 +108,13 @@ final class CineoEditorModel: ObservableObject {
                 return
             }
             duration = t.seconds
+            let fps = Double(try await track.load(.nominalFrameRate))
+            sourceFrameRate = fps.isFinite && fps > 1 && fps <= 240 ? fps : 30
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.requestedTimeToleranceBefore = CMTime(value: 1, timescale: 60)
+            generator.requestedTimeToleranceAfter = CMTime(value: 1, timescale: 60)
+            previewGenerator = generator
             sourcePixelWidth = Int(size.width)
             sourcePixelHeight = Int(size.height)
             selectedTime = 0
@@ -236,6 +247,7 @@ final class CineoEditorModel: ObservableObject {
         }
         previewTask?.cancel()
         previewTask = nil
+        previewGenerator = nil
         preview = nil
         sourceURL = nil
         projectURL = nil
@@ -252,6 +264,12 @@ final class CineoEditorModel: ObservableObject {
             focusY = state.cropY + state.cropHeight / 2
         }
         refreshPreview()
+    }
+
+    /// Precise manual storyboard navigation; does not alter camera keyframes.
+    func stepPreview(frames: Int) {
+        guard sourceURL != nil else { return }
+        scrub(selectedTime + Double(frames) / sourceFrameRate)
     }
 
     func changeZoom(_ newZoom: Double) {
@@ -418,7 +436,7 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func refreshPreview() {
-        guard let url = sourceURL else { return }
+        guard sourceURL != nil, let generator = previewGenerator else { return }
         previewTask?.cancel()
         let request = UUID()
         previewRequest = request
@@ -426,13 +444,11 @@ final class CineoEditorModel: ObservableObject {
         let seconds = selectedTime
         loadingPreview = true
         previewTask = Task {
-            try? await Task.sleep(for: .milliseconds(110))
+            // A short coalescing window avoids decoding every intermediate
+            // slider movement; 110 ms was too slow to judge zoom timing.
+            try? await Task.sleep(for: .milliseconds(35))
             guard !Task.isCancelled else { return }
             do {
-                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
-                generator.appliesPreferredTrackTransform = true
-                generator.requestedTimeToleranceBefore = CMTime(value: 1, timescale: 30)
-                generator.requestedTimeToleranceAfter = CMTime(value: 1, timescale: 30)
                 let cgImage = try generator.copyCGImage(
                     at: CMTime(seconds: seconds, preferredTimescale: 600), actualTime: nil
                 )
@@ -442,7 +458,7 @@ final class CineoEditorModel: ObservableObject {
                 )
                 let canvas = CGRect(x: 0, y: 0,
                                     width: CGFloat(plan.outputWidth), height: CGFloat(plan.outputHeight))
-                guard let rendered = CIContext().createCGImage(composited, from: canvas) else {
+                guard let rendered = previewCIContext.createCGImage(composited, from: canvas) else {
                     status = "Impossibile renderizzare l'anteprima."
                     return
                 }
@@ -603,6 +619,11 @@ struct CineoManualEditorView: View {
                     }
                     .frame(width: 720, height: 410)
                     HStack {
+                        Button { editor.stepPreview(frames: -1) } label: {
+                            Image(systemName: "backward.frame.fill")
+                        }
+                        .help("Fotogramma precedente")
+                        .disabled(editor.sourceURL == nil)
                         Text(String(format: "%02d:%05.2f",
                                     Int(editor.selectedTime) / 60,
                                     editor.selectedTime.truncatingRemainder(dividingBy: 60)))
@@ -613,6 +634,11 @@ struct CineoManualEditorView: View {
                         ), in: 0...max(0.1, editor.duration - 0.05))
                         Text(String(format: "%.1f s", editor.duration))
                             .font(.caption.monospacedDigit())
+                        Button { editor.stepPreview(frames: 1) } label: {
+                            Image(systemName: "forward.frame.fill")
+                        }
+                        .help("Fotogramma successivo")
+                        .disabled(editor.sourceURL == nil)
                     }
                     Text("Seleziona un momento nella timeline, poi clicca sull'anteprima per scegliere il punto d'interesse.")
                         .font(.caption).foregroundStyle(.secondary)
