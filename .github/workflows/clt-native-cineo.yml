@@ -11,6 +11,8 @@ on:
       - 'Packages/CineoProject/**'
       - 'Packages/CineoEditPlanner/**'
       - 'scripts/build-cineo-clt.sh'
+      - 'scripts/ensure-cineo-signing.sh'
+      - 'scripts/ensure-cineo-signing.sh'
       - '.github/workflows/clt-native-cineo.yml'
   push:
     branches: [main]
@@ -36,6 +38,7 @@ jobs:
     timeout-minutes: 30
     env:
       DEVELOPER_DIR: /Library/Developer/CommandLineTools
+      CINEO_SIGNING_MODE: adhoc
     steps:
       - uses: actions/checkout@v4
       - name: Verify real CLT environment
@@ -45,6 +48,7 @@ jobs:
           xcrun --sdk macosx --show-sdk-path
           swift --version
           bash -n scripts/build-cineo-clt.sh
+          bash -n scripts/ensure-cineo-signing.sh
           bash -n scripts/swift-test-clt.sh
           bash -n scripts/test-cineo.sh
           bash scripts/test-cineo.sh --preflight
@@ -71,6 +75,41 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$app/Contents/Info.plist")" = "Cineo Stop Fix"
           codesign --verify --strict "$app"
           echo "PASS: isolated capture candidate signed and verified."
+
+  # A separate job exercises persistent signing with an ephemeral CI Keychain.
+  # It never imports/exports the developer's real signing certificate.
+  persistent-signing:
+    name: Stable designated requirement across rebuilds (no Xcode)
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Library/Developer/CommandLineTools
+      CINEO_SIGNING_MODE: persistent
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap a temporary signing identity and prove requirement stability
+        run: |
+          set -euo pipefail
+          export CINEO_SIGNING_KEYCHAIN="$RUNNER_TEMP/cineo-persistent-ci.keychain-db"
+          export CINEO_SIGNING_HOME="$RUNNER_TEMP/cineo-persistent-signing"
+          export CINEO_CLT_BUILD_ROOT="$RUNNER_TEMP/cineo-persistent-app"
+          security create-keychain -p "cineo-ci-temporary" "$CINEO_SIGNING_KEYCHAIN"
+          security unlock-keychain -p "cineo-ci-temporary" "$CINEO_SIGNING_KEYCHAIN"
+          first="$(bash scripts/ensure-cineo-signing.sh)"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "cineo-ci-temporary" "$CINEO_SIGNING_KEYCHAIN"
+          second="$(bash scripts/ensure-cineo-signing.sh)"
+          test "$first" = "$second"
+          bash scripts/build-cineo-clt.sh
+          app="$CINEO_CLT_BUILD_ROOT/Cineo.app"
+          req_before="$(codesign -d -r- "$app" 2>&1 | grep 'designated =>')"
+          test -n "$req_before"
+          if grep -qi 'cdhash' <<< "$req_before"; then exit 1; fi
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 2" "$app/Contents/Info.plist"
+          codesign --force --sign "$first" --timestamp=none --keychain "$CINEO_SIGNING_KEYCHAIN" "$app"
+          codesign --verify --strict "$app"
+          req_after="$(codesign -d -r- "$app" 2>&1 | grep 'designated =>')"
+          test "$req_before" = "$req_after"
+          echo "PASS: signing identity reused; designated requirement unchanged across modified app versions."
 
   clt-core-smoke:
     name: Core algorithm smoke without Swift Testing macros (CLT only)
