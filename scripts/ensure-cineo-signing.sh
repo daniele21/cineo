@@ -38,7 +38,7 @@ is_valid_identity() {
 }
 installed_cineo_identities() {
   security find-identity -v -p codesigning "$KEYCHAIN" 2>/dev/null |
-    awk -v name="\"$CERT_NAME\"" 'index($0,name)>0 && $2 ~ /^[0-9A-Fa-f]{40}$/ {print $2}'
+    awk -v name="\"$CERT_NAME\"" 'index($0,name)>0 && length($2)==40 && $2 ~ /^[0-9A-Fa-f]+$/ {print $2}'
 }
 store_pin() {
   local sha="$1" scratch
@@ -51,7 +51,9 @@ store_pin() {
 if [[ -f "$PIN_FILE" ]]; then
   IFS= read -r sha < "$PIN_FILE" || true
   is_sha1 "${sha:-}" || { echo "Invalid Cineo identity pin at $PIN_FILE" >&2; exit 2; }
-  if [[ -n "${CINEO_SIGNING_IDENTITY:-}" && "${CINEO_SIGNING_IDENTITY^^}" != "${sha^^}" ]]; then
+  requested_sha="$(printf '%s' "${CINEO_SIGNING_IDENTITY:-}" | tr '[:lower:]' '[:upper:]')"
+  pinned_sha="$(printf '%s' "$sha" | tr '[:lower:]' '[:upper:]')"
+  if [[ -n "$requested_sha" && "$requested_sha" != "$pinned_sha" ]]; then
     echo "Refusing to change the pinned Cineo signing identity. Existing: $sha" >&2
     echo "Changing identities would require granting macOS permissions again." >&2
     exit 2
@@ -69,7 +71,7 @@ fi
 
 sha=""
 if [[ -n "${CINEO_SIGNING_IDENTITY:-}" ]]; then
-  sha="${CINEO_SIGNING_IDENTITY^^}"
+  sha="$(printf '%s' "$CINEO_SIGNING_IDENTITY" | tr '[:lower:]' '[:upper:]')"
   is_sha1 "$sha" || { echo "CINEO_SIGNING_IDENTITY must be a 40-character certificate SHA-1." >&2; exit 2; }
   is_valid_identity "$sha" || { echo "Configured signing identity $sha is not valid in the login Keychain." >&2; exit 2; }
 else
