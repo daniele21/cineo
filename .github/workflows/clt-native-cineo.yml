@@ -4,12 +4,22 @@ on:
   pull_request:
     paths:
       - 'Apps/Cineo/**'
+      - 'scripts/swift-test-clt.sh'
+      - 'scripts/test-cineo.sh'
+      - 'Packages/CineoDirector/**'
+      - 'Packages/CineoProject/**'
+      - 'Packages/CineoEditPlanner/**'
       - 'scripts/build-cineo-clt.sh'
       - '.github/workflows/clt-native-cineo.yml'
   push:
     branches: [main]
     paths:
       - 'Apps/Cineo/**'
+      - 'scripts/swift-test-clt.sh'
+      - 'scripts/test-cineo.sh'
+      - 'Packages/CineoDirector/**'
+      - 'Packages/CineoProject/**'
+      - 'Packages/CineoEditPlanner/**'
       - 'scripts/build-cineo-clt.sh'
       - '.github/workflows/clt-native-cineo.yml'
   workflow_dispatch:
@@ -33,13 +43,30 @@ jobs:
           xcrun --sdk macosx --show-sdk-path
           swift --version
           bash -n scripts/build-cineo-clt.sh
+          bash -n scripts/swift-test-clt.sh
+          bash -n scripts/test-cineo.sh
+          bash scripts/test-cineo.sh --preflight
       - name: Compile and package real screen recorder
         env:
           CINEO_CLT_BUILD_ROOT: ${{ runner.temp }}/cineo-capture
         run: |
           set -euo pipefail
-          bash scripts/build-cineo-clt.sh
+          bash scripts/test-cineo.sh --native
           test -x "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/MacOS/Cineo"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/Info.plist")" = com.daniele21.cineo.capturealpha
           codesign --verify --strict "$CINEO_CLT_BUILD_ROOT/Cineo.app"
           echo "Native Cineo app packaged under standalone CLT."
+
+  clt-swift-tests:
+    name: Swift Testing using Command Line Tools only
+    runs-on: macos-26
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Library/Developer/CommandLineTools
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run all three Swift Testing suites without Xcode
+        run: |
+          set -euo pipefail
+          test "$(xcode-select -p)" = /Library/Developer/CommandLineTools
+          bash scripts/test-cineo.sh --quick
