@@ -20,7 +20,7 @@ CLT GitHub Actions verifies **compilation and bundle signing** only. It cannot d
 
 ## Real-Mac regression for the stop/finalization race
 
-1. Build/launch with `bash scripts/test-cineo.sh --interactive` (CLT only, no Xcode.app).
+1. Quit earlier Cineo processes. Fetch the candidate branch and build/launch with `bash scripts/test-cineo.sh --interactive` (CLT only, no Xcode.app). This command launches the exact newly built bundle with `open -n -a`; the app shows **Capture fix candidate • stream-stop finalization** and logs **Build variant: stream-stop finalization**. If those markers are missing, you launched a stale Cineo binary and the recording result does not test this fix.
 2. Record a harmless desktop for at least 10 seconds; press Stop exactly once.
 3. Expect `Capture stream stopped`, then `Finalization callback received`, then `Verified MP4`. Check the MP4 opens and has video, nonzero duration and nonzero size.
 4. Repeat with short (3 s) and longer (60 s) recordings, and with a second recording in the same app session. Confirm no `RPRecordingErrorDomain -5814` / `-5815` and no stuck `Finalizing MP4` phase.
