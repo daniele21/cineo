@@ -87,4 +87,50 @@ struct CineoProjectTests {
         #expect(try TimelineMapper.outputDuration(for: project) == 0)
         #expect(try TimelineMapper.source(at: 0, in: project) == nil)
     }
+    @Test func mediaDirectorySymlinkIsNotAllowedToEscapePackage() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let package = root.appendingPathComponent("project.cineo", isDirectory: true)
+        let external = root.appendingPathComponent("outside", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: external, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: package.appendingPathComponent("Media"),
+                                                   withDestinationURL: external)
+        let original = fixture()
+        #expect(throws: ProjectError.invalidSource) {
+            try CineoProjectStore().save(original, in: package)
+        }
+        #expect(!FileManager.default.fileExists(atPath: external.appendingPathComponent("manifest.json").path))
+    }
+
+    @Test func sourceSymlinkOutsideMediaCannotBeLoaded() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let package = root.appendingPathComponent("test.cineo")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let original = fixture()
+        let store = CineoProjectStore()
+        try store.save(original, in: package)
+        let external = root.appendingPathComponent("private.mov")
+        try Data("PRIVATE".utf8).write(to: external)
+        try FileManager.default.createSymbolicLink(at: package.appendingPathComponent("Media/capture.mov"),
+                                                   withDestinationURL: external)
+        #expect(throws: ProjectError.invalidSource) {
+            try store.load(from: package)
+        }
+    }
+
+    @Test func importedMediaRejectsSymlinkSource() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let package = root.appendingPathComponent("test.cineo")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("source.mov")
+        let symlink = root.appendingPathComponent("shortcut.mov")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("SOURCE".utf8).write(to: source)
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: source)
+        #expect(throws: ProjectError.invalidSource) {
+            try CineoProjectStore().importMedia(from: symlink, into: package, filename: "capture.mov")
+        }
+    }
+
 }
