@@ -29,10 +29,11 @@ def apply_overlay(root: Path) -> None:
     delegate_file = root / "Reco" / "AppDelegate.swift"
     zoom_file = root / "Reco" / "Editor" / "ViewModel" / "EditorViewModel+Zooming.swift"
     editor_project_file = root / "Reco" / "Editor" / "Model" / "EditorProject.swift"
+    editor_view_file = root / "Reco" / "Editor" / "View" / "EditorView.swift"
     repo_root = Path(__file__).resolve().parent.parent
     camera_source = repo_root / "Packages" / "CineoDirector" / "Sources" / "CineoDirector" / "CameraPlanner.swift"
     bridge_source = repo_root / "native" / "OrbitIntegration" / "CineoAutoZoomBridge.swift"
-    for extra in (zoom_file, editor_project_file, camera_source, bridge_source):
+    for extra in (zoom_file, editor_project_file, editor_view_file, camera_source, bridge_source):
         if not extra.is_file():
             raise FileNotFoundError(f"Cineo camera integration file missing: {extra}")
     for path in (project, info_file, main_file, app_file, delegate_file, root / "LICENSE"):
@@ -89,6 +90,22 @@ def apply_overlay(root: Path) -> None:
     old = "AutoZoomGenerator.segments(for: $0, duration: source.duration)"
     project_code = replace_exact(editor_project_file.read_text(), old,
                                 "CineoAutoZoomBridge.segments(for: $0, duration: source.duration)", 1)
+    # Make the existing one-click regeneration discoverable in Cineo's
+    # native editor toolbar, without inventing a separate rendering pipeline.
+    # Orbit's editor retains full undo/redo and manual zoom preservation.
+    editor_view = replace_exact(
+        editor_view_file.read_text(),
+        "        if export == nil {\n            ToolbarItem(placement: .primaryAction) {",
+        "        if export == nil {\n"
+        "            ToolbarItem(placement: .primaryAction) {\n"
+        "                Button { viewModel.regenerateZooms() } label: {\n"
+        "                    Label(\"Smart Zooms\", systemImage: \"wand.and.stars\")\n"
+        "                }\n"
+        "                .disabled(viewModel.source?.telemetry == nil)\n"
+        "                .help(\"Regenerate intelligent zooms. Your manual zooms are preserved.\")\n"
+        "            }\n"
+        "            ToolbarItem(placement: .primaryAction) {", 1
+    )
     director = camera_source.read_text()
     for declaration in ("AttentionEvent", "CameraShot", "CameraPlanner"):
         director = replace_exact(director, f"public struct {declaration}:",
@@ -106,6 +123,7 @@ def apply_overlay(root: Path) -> None:
     delegate_file.write_text(delegate)
     zoom_file.write_text(zoom_code)
     editor_project_file.write_text(project_code)
+    editor_view_file.write_text(editor_view)
     staging_service = root / "Reco" / "Editor" / "Service"
     (staging_service / "CineoCameraPlanner.swift").write_text(director)
     shutil.copy2(bridge_source, staging_service / "CineoAutoZoomBridge.swift")
