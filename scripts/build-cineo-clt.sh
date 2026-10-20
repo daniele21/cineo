@@ -84,6 +84,15 @@ cat > "$STAGE/Contents/Info.plist" <<'EOF'
   <string>Cineo records your selected screen only when you click Record. Videos remain on this Mac.</string>
 </dict></plist>
 EOF
+# Stamp the *source* into the signed bundle, not just the build script output.
+# Running windows can then prove what code actually launched.
+SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --short=12 HEAD)"
+[[ "$SOURCE_COMMIT" =~ ^[0-9a-fA-F]{12}$ ]] || {
+  echo "Cannot determine Cineo source commit for diagnostic build identity." >&2
+  exit 3
+}
+plutil -insert CineoSourceCommit -string "$SOURCE_COMMIT" "$STAGE/Contents/Info.plist"
+plutil -insert CineoCaptureImplementation -string "stream-stop-v2" "$STAGE/Contents/Info.plist"
 if [[ "${CINEO_CLT_ISOLATED_CAPTURE:-0}" == "1" ]]; then
   # Separate app identity ensures LaunchServices and the macOS permission UI
   # cannot silently conflate this candidate with the old Cineo build.
@@ -117,5 +126,6 @@ rm -rf "$APP"
 mv "$STAGE" "$APP"
 echo "PASS: Xcode-free native Cineo screen capture app compiled and signed ($SIGNING_MODE)."
 echo "App: $APP"
+echo "Signed build source commit: $SOURCE_COMMIT"
 echo "No screen data is recorded until you open the app and click Record."
 echo "Not part of this alpha: Orbit editor, Smart Zooms and audio recording."
