@@ -27,6 +27,18 @@ For the first slice, *Auto* means **style/framing presets and optional event-bas
 
 **Non-negotiable:** SwiftPM + Apple Command Line Tools only; Apple Silicon macOS 15+ baseline; on-device/offline; single scene evaluator; deterministic effect plans; original media preserved; no typed text in telemetry; never pass off a simulated preview as actual rendered output.
 
+## Mandatory source-reuse and CLT renderer decision
+
+**Source-level evidence and pinned upstream SHAs:** [2026-10-20 Auto Edit repository research](../research/auto-edit-upstream-2026-10.md). Before implementing the Track B renderer, explicitly compare these approaches, rather than starting a greenfield compositor or attempting to import a full Xcode/Electron-based editor:
+
+1. **Primary** — Orbit's Swift/Core Image `RenderPlan`, `FrameRenderer`, `CameraPath`, `TimeMap` model, with only a small audited and licensed subset considered for migration to the CLT-only Cineo SwiftPM target. Cineo's preexisting `CineoProject/CineoEditPlanner/CineoDirector` remain canonical data/planning owners; do not establish a second persistent editing schema.
+2. **Independent reference** — CineScreen's shared `FrameCompositor` (single render pass implementation for live preview and offline export). This is an architectural pattern, not permission to introduce mandatory `.metal` shader compilation. A dedicated standalone **CLT-only** shader compiler probe is a prerequisite for the Metal variant.
+3. **Automation** — OpenScreen's GUI/CLI shared export job and frame-progress contracts; Auto-Editor's activity/idle selection and dry-run; Palmier's validated agent tools/job cancellation. Cineo's CLI is native SwiftPM and does not start a hidden Electron window.
+4. **Restricted code** — ArcShot's modified MIT license forbids App Store derivations, Recordly/Cap majority AGPL, Palmier GPL, Remotion custom terms. Treat code as read-only research unless the actual per-file license/redistribution conditions are intentionally accepted and documented.
+5. **Model accuracy** — recording without pointer events is not equivalent to retrospective click recognition; silent video is not a valid input for automatic silence cuts. First G1 demonstration must work entirely without telemetry via style + manual camera.
+
+**New Track B early exit gate:** 25-second real MP4 → Core Image/AVFoundation edited MP4 with an observable style+zoom, CLT-only successful build, source unchanged, output metadata and sampled frames verified. No Studio GUI or agent scripting is allowed to claim production readiness before this real output exists. **Metal is only a secondary measured spike**; if compiling shaders requires Xcode.app, fail/abandon that spike without blocking the primary renderer.
+
 ## Milestones and dependency graph
 
 ```text
