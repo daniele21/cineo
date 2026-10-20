@@ -81,7 +81,7 @@ public struct CineoSceneExporter: Sendable {
         }
         writer.startSession(atSourceTime: .zero)
         let ciContext = CIContext(options: [.useSoftwareRenderer: false])
-        let outputBounds = CGRect(x: 0, y: 0, width: width, height: height)
+        let outputBounds = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bg = CIImage(color: CIColor(red: plan.background.red,
                                         green: plan.background.green,
@@ -133,7 +133,7 @@ public struct CineoSceneExporter: Sendable {
                 ciContext.render(edited, to: newBuffer, bounds: outputBounds, colorSpace: colorSpace)
                 while !writerInput.isReadyForMoreMediaData {
                     try Task.checkCancellation()
-                    Thread.sleep(forTimeInterval: 0.005)
+                    try await Task.sleep(for: .milliseconds(5))
                 }
                 guard adaptor.append(newBuffer, withPresentationTime: relativePTS) else {
                     throw CineoSceneError.writerFailed
@@ -156,8 +156,8 @@ public struct CineoSceneExporter: Sendable {
                   abs(outDuration.seconds - duration.seconds) < 0.35
             else { throw CineoSceneError.invalidOutput }
             let outSize = try await outTrack.load(.naturalSize)
-            guard abs(outSize.width - Double(width)) <= 1,
-                  abs(outSize.height - Double(height)) <= 1
+            guard abs(outSize.width - CGFloat(width)) <= 1,
+                  abs(outSize.height - CGFloat(height)) <= 1
             else { throw CineoSceneError.invalidOutput }
             try Task.checkCancellation()
             guard !manager.fileExists(atPath: destination.path) else {
