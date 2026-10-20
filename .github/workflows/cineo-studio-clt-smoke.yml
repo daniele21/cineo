@@ -1,0 +1,48 @@
+name: Cineo Studio integrated CLT-only rendering
+
+on:
+  pull_request:
+    paths:
+      - 'Apps/Cineo/**'
+      - 'Packages/CineoScene/**'
+      - '.github/workflows/cineo-studio-clt-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  geometry:
+    name: Pure Swift scene geometry tests
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.2
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run deterministic plan, timebase and crop tests
+        run: swift test --package-path Packages/CineoScene
+
+  real-frames-synthetic:
+    name: Native H264 edited frame export without Xcode
+    runs-on: macos-26
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Library/Developer/CommandLineTools
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm Apple Command Line Tools, not Xcode
+        run: |
+          test "$(xcode-select -p)" = /Library/Developer/CommandLineTools
+          xcrun --sdk macosx --show-sdk-path
+          swift --version
+      # Apple's CLT-only macOS runner lacks the Swift TestingMacros
+      # plugin. Test pure Foundation geometry in Linux Swift 6.2 above;
+      # retain real AVFoundation/Core Image native smoke on macOS below.
+      - name: Generate and re-render synthetic H264 with shared preview/export compositor
+        run: |
+          swift run --package-path Packages/CineoScene --configuration release cineo-scene-smoke
+      - name: Build integrated SwiftUI Cineo Dev app without Xcode
+        run: |
+          swift build --package-path Apps/Cineo --configuration release
+          echo 'CLT Studio integration compiles. Interactive UI/TCC requires a physical Mac test.'
