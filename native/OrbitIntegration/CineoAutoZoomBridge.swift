@@ -6,7 +6,7 @@ import Foundation
 /// Orbit's RenderPlan/TimeMap transforms zoom segments into output time.
 nonisolated enum CineoAutoZoomBridge {
 
-    static func segments(for telemetry: InputTelemetry, duration: Double) -> [ZoomSegment] {
+    static func segments(for telemetry: InputTelemetry, duration: Double, preset: CameraPreset = .balanced) -> [ZoomSegment] {
         guard duration.isFinite, duration > 0 else { return [] }
 
         // Use only explicit click locations; never collect or infer typed text.
@@ -24,7 +24,7 @@ nonisolated enum CineoAutoZoomBridge {
         // The director makes a small number of deliberate focus suggestions,
         // not a 2x jump at each input event. Unobservable outcomes must not be
         // fabricated; manual zooms and semantic anchors are separate features.
-        let shots = CameraPlanner().suggest(events: events, duration: duration)
+        let shots = CameraPlanner(configuration: preset.configuration).suggest(events: events, duration: duration)
 
         return shots.map { shot in
             ZoomSegment(

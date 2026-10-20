@@ -32,9 +32,10 @@ def apply_overlay(root: Path) -> None:
     editor_view_file = root / "Reco" / "Editor" / "View" / "EditorView.swift"
     repo_root = Path(__file__).resolve().parent.parent
     camera_source = repo_root / "Packages" / "CineoDirector" / "Sources" / "CineoDirector" / "CameraPlanner.swift"
+    preset_source = repo_root / "Packages" / "CineoDirector" / "Sources" / "CineoDirector" / "CameraPreset.swift"
     bridge_source = repo_root / "native" / "OrbitIntegration" / "CineoAutoZoomBridge.swift"
     bridge_tests = repo_root / "native" / "OrbitIntegration" / "CineoAutoZoomBridgeTests.swift"
-    for extra in (zoom_file, editor_project_file, editor_view_file, camera_source, bridge_source, bridge_tests):
+    for extra in (zoom_file, editor_project_file, editor_view_file, camera_source, preset_source, bridge_source, bridge_tests):
         if not extra.is_file():
             raise FileNotFoundError(f"Cineo camera integration file missing: {extra}")
     for path in (project, info_file, main_file, app_file, delegate_file, root / "LICENSE"):
@@ -115,6 +116,11 @@ def apply_overlay(root: Path) -> None:
     old = "AutoZoomGenerator.segments(for: telemetry, duration: source.duration)"
     zoom_code = replace_exact(zoom_file.read_text(), old,
                               "CineoAutoZoomBridge.segments(for: telemetry, duration: source.duration)", 1)
+    zoom_code = replace_exact(zoom_code, "func regenerateZooms() {",
+                              "func regenerateZooms(preset: CameraPreset = .balanced) {", 1)
+    zoom_code = replace_exact(zoom_code,
+                              "CineoAutoZoomBridge.segments(for: telemetry, duration: source.duration)",
+                              "CineoAutoZoomBridge.segments(for: telemetry, duration: source.duration, preset: preset)", 1)
     old = "AutoZoomGenerator.segments(for: $0, duration: source.duration)"
     project_code = replace_exact(editor_project_file.read_text(), old,
                                 "CineoAutoZoomBridge.segments(for: $0, duration: source.duration)", 1)
@@ -124,7 +130,11 @@ def apply_overlay(root: Path) -> None:
         "        if export == nil {\n            ToolbarItem(placement: .primaryAction) {",
         "        if export == nil {\n"
         "            ToolbarItem(placement: .primaryAction) {\n"
-        "                Button { viewModel.regenerateZooms() } label: {\n"
+        "                Menu {\n"
+        "                    Button(\"Subtle\") { viewModel.regenerateZooms(preset: .subtle) }\n"
+        "                    Button(\"Balanced\") { viewModel.regenerateZooms(preset: .balanced) }\n"
+        "                    Button(\"Dynamic\") { viewModel.regenerateZooms(preset: .dynamic) }\n"
+        "                } label: {\n"
         "                    Label(\"Smart Zooms\", systemImage: \"wand.and.stars\")\n"
         "                }\n"
         "                .disabled(viewModel.source?.telemetry == nil)\n"
@@ -132,6 +142,9 @@ def apply_overlay(root: Path) -> None:
         "            }\n"
         "            ToolbarItem(placement: .primaryAction) {", 1
     )
+    preset_code = replace_exact(preset_source.read_text(),
+                                "public enum CameraPreset:",
+                                "nonisolated public enum CameraPreset:", 1)
     director = camera_source.read_text()
     for declaration in ("AttentionEvent", "CameraShot", "CameraPlanner"):
         director = replace_exact(director, f"public struct {declaration}:",
@@ -152,6 +165,7 @@ def apply_overlay(root: Path) -> None:
     editor_view_file.write_text(editor_view)
     staging_service = root / "Reco" / "Editor" / "Service"
     (staging_service / "CineoCameraPlanner.swift").write_text(director)
+    (staging_service / "CineoCameraPreset.swift").write_text(preset_code)
     shutil.copy2(bridge_source, staging_service / "CineoAutoZoomBridge.swift")
     shutil.copy2(bridge_tests, root / "RecoTests" / "CineoAutoZoomBridgeTests.swift")
 
