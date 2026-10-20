@@ -538,7 +538,7 @@ struct CineoManualEditorView: View {
                 CineoBrandSymbol(size: 34)
                 Text("Cineo Studio")
                     .font(CineoBrand.displayFont(size: 23))
-                    .foregroundStyle(CineoBrand.ink)
+                    .foregroundStyle(.primary) // Auto-adapts brand headline for macOS Dark Mode
                 Spacer()
                 Picker("Modalità", selection: Binding(
                     get: { editor.mode }, set: { editor.mode = $0 }
