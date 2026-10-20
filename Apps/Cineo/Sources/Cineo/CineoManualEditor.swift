@@ -519,7 +519,10 @@ struct CineoManualEditorView: View {
             HStack {
                 Button("‹ Registrazione") { onClose() }
                     .disabled(editor.isExporting || editor.isSavingProject)
-                Text("Cineo Studio").font(.title2.bold())
+                CineoBrandSymbol(size: 34)
+                Text("Cineo Studio")
+                    .font(CineoBrand.displayFont(size: 23))
+                    .foregroundStyle(CineoBrand.ink)
                 Spacer()
                 Picker("Modalità", selection: Binding(
                     get: { editor.mode }, set: { editor.mode = $0 }
@@ -719,6 +722,7 @@ struct CineoManualEditorView: View {
         }
         .padding(20)
         .frame(minWidth: 1040, minHeight: 580)
+        .tint(CineoBrand.ocean)
         .sheet(isPresented: Binding(
             get: { editor.showingInstructions },
             set: { editor.showingInstructions = $0 }
