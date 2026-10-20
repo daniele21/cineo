@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import plistlib
+import shutil
 from pathlib import Path
 
 BUNDLE_ID = "com.daniele21.cineo"
@@ -26,6 +27,14 @@ def apply_overlay(root: Path) -> None:
     main_file = root / "Reco" / "RecoMain.swift"
     app_file = root / "Reco" / "RecoApp.swift"
     delegate_file = root / "Reco" / "AppDelegate.swift"
+    zoom_file = root / "Reco" / "Editor" / "ViewModel" / "EditorViewModel+Zooming.swift"
+    editor_project_file = root / "Reco" / "Editor" / "Model" / "EditorProject.swift"
+    repo_root = Path(__file__).resolve().parent.parent
+    camera_source = repo_root / "Packages" / "CineoDirector" / "Sources" / "CineoDirector" / "CameraPlanner.swift"
+    bridge_source = repo_root / "native" / "OrbitIntegration" / "CineoAutoZoomBridge.swift"
+    for extra in (zoom_file, editor_project_file, camera_source, bridge_source):
+        if not extra.is_file():
+            raise FileNotFoundError(f"Cineo camera integration file missing: {extra}")
     for path in (project, info_file, main_file, app_file, delegate_file, root / "LICENSE"):
         if not path.is_file():
             raise FileNotFoundError(f"Orbit source tree incomplete: {path}")
@@ -71,15 +80,35 @@ def apply_overlay(root: Path) -> None:
     delegate = replace_exact(delegate_file.read_text(), "        agentBridge.start()\n",
                              "        // P1: upstream local agent bridge disabled until explicit security review.\n", 1)
 
+    # Reco uses PBXFileSystemSynchronizedRootGroup, so staged .swift files inside
+    # Reco/Editor/Service are compiled into its native app without editing PBX.
+    # Keep source-time zoom lane semantics; Orbit's TimeMap retimes for playback.
+    old = "AutoZoomGenerator.segments(for: telemetry, duration: source.duration)"
+    zoom_code = replace_exact(zoom_file.read_text(), old,
+                              "CineoAutoZoomBridge.segments(for: telemetry, duration: source.duration)", 1)
+    old = "AutoZoomGenerator.segments(for: $0, duration: source.duration)"
+    project_code = replace_exact(editor_project_file.read_text(), old,
+                                "CineoAutoZoomBridge.segments(for: $0, duration: source.duration)", 1)
+    director = camera_source.read_text()
+    for declaration in ("AttentionEvent", "CameraShot", "CameraPlanner"):
+        director = replace_exact(director, f"public struct {declaration}:",
+                                 f"nonisolated public struct {declaration}:", 1)
+    
     project.write_text(pbx)
     with info_file.open("wb") as stream:
         plistlib.dump(info, stream, sort_keys=False)
     main_file.write_text(main)
     app_file.write_text(app)
     delegate_file.write_text(delegate)
+    zoom_file.write_text(zoom_code)
+    editor_project_file.write_text(project_code)
+    staging_service = root / "Reco" / "Editor" / "Service"
+    (staging_service / "CineoCameraPlanner.swift").write_text(director)
+    shutil.copy2(bridge_source, staging_service / "CineoAutoZoomBridge.swift")
 
     print(f"Applied Cineo P1 overlay for {BUNDLE_ID} to {root}")
     print("Source license retained. Upstream migration, app updater, URL handler and agent bridge disabled.")
+    print("Native editor new-recording and Regenerate Zooms now use CineoDirector; Orbit renderer unchanged.")
 
 
 if __name__ == "__main__":
