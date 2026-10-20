@@ -20,7 +20,7 @@ CLT GitHub Actions verifies **compilation and bundle signing** only. It cannot d
 
 ## Real-Mac regression for the stop/finalization race
 
-1. Quit earlier Cineo processes. Fetch the candidate branch and build/launch with `bash scripts/test-cineo.sh --interactive` (CLT only, no Xcode.app). This command launches the exact newly built bundle with `open -n -a`; the app shows **Capture fix candidate • stream-stop finalization** and logs **Build variant: stream-stop finalization**. If those markers are missing, you launched a stale Cineo binary and the recording result does not test this fix.
+1. Use the dedicated candidate checkout and launch with `bash scripts/test-cineo.sh --isolated-capture` (CLT only, no Xcode.app). This builds a separately signed **Cineo Stop Fix.app** with bundle ID `com.daniele21.cineo.capturealpha.stopfix`; it leaves existing Cineo.app and its macOS permission identity untouched. The command checks bundle ID and prints the exact source HEAD before opening a fresh instance. macOS may request Screen Recording permission again for the new identity. Verify the new app shows **Capture fix candidate • stream-stop finalization** and logs **Build variant: stream-stop finalization**. If either marker is missing, the recording does not test this fix.
 2. Record a harmless desktop for at least 10 seconds; press Stop exactly once.
 3. Expect `Capture stream stopped`, then `Finalization callback received`, then `Verified MP4`. Check the MP4 opens and has video, nonzero duration and nonzero size.
 4. Repeat with short (3 s) and longer (60 s) recordings, and with a second recording in the same app session. Confirm no `RPRecordingErrorDomain -5814` / `-5815` and no stuck `Finalizing MP4` phase.
