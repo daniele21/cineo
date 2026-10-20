@@ -4,6 +4,7 @@ import AVFoundation
 import AppKit
 import CoreImage
 import CineoScene
+import CineoProject
 import CryptoKit
 
 @MainActor
@@ -14,6 +15,8 @@ final class CineoEditorModel: ObservableObject {
     }
 
     @Published var sourceURL: URL?
+    @Published private(set) var projectURL: URL?
+    @Published private(set) var isSavingProject = false
     @Published var title = ""
     @Published var sourcePixelWidth = 1512
     @Published var sourcePixelHeight = 982
@@ -54,12 +57,32 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func open(_ url: URL) async {
-        status = "Caricamento del video…"
+        guard !isExporting && !isSavingProject else { return }
+        status = "Caricamento del video o progetto…"
+        previewTask?.cancel()
         preview = nil
         sourceURL = nil
+        projectURL = nil
         outputURL = nil
         do {
-            let asset = AVURLAsset(url: url)
+            var mediaURL = url
+            var openedProject: CineoManifest?
+            if url.pathExtension.lowercased() == "cineo" {
+                let manifest = try CineoProjectStore().load(from: url)
+                // v0 renderer supports one original untrimmed source only.
+                guard manifest.sources.count == 1, manifest.edits.count == 1,
+                      manifest.edits[0].sourceID == manifest.sources[0].id,
+                      manifest.edits[0].sourceStart == 0,
+                      manifest.edits[0].speed == 1,
+                      abs(manifest.edits[0].sourceEnd - manifest.sources[0].duration) < 0.001
+                else {
+                    status = "Questo progetto usa tagli o clip multiple non ancora supportati da Studio."
+                    return
+                }
+                mediaURL = url.appendingPathComponent(manifest.sources[0].relativePath)
+                openedProject = manifest
+            }
+            let asset = AVURLAsset(url: mediaURL)
             guard let track = try await asset.loadTracks(withMediaType: .video).first else {
                 status = "Il file non contiene una traccia video."
                 return
@@ -83,13 +106,56 @@ final class CineoEditorModel: ObservableObject {
             portrait = false
             style = "Dark"
             keyframes = []
-            title = url.lastPathComponent
-            sourceURL = url
+            title = openedProject?.title ?? url.lastPathComponent
+            sourceURL = mediaURL
+            projectURL = openedProject == nil ? nil : url
             restorePlan()
-            status = "Regola lo zoom oppure scegli un punto sull'anteprima. L'originale non verrà modificato."
+            status = projectURL == nil
+                ? "Regola lo zoom o scegli un punto. Puoi salvare tutto in un progetto Cineo."
+                : "Progetto Cineo riaperto: puoi modificare ed esportare senza cambiare l'originale."
             refreshPreview()
         } catch {
-            status = "Impossibile aprire il video: \(error.localizedDescription)"
+            status = "Impossibile aprire video o progetto: \(error.localizedDescription)"
+        }
+    }
+
+    /// Import an already inspected recording into an independent, crash-safe
+    /// versioned project. The original recording is not moved or overwritten.
+    func saveAsProject() {
+        guard let source = sourceURL, projectURL == nil,
+              !isSavingProject, !isExporting, duration.isFinite, duration > 0 else { return }
+        let projects = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Cineo/Projects", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+        } catch {
+            status = "Impossibile creare la cartella progetti: \(error.localizedDescription)"
+            return
+        }
+        let location = projects.appendingPathComponent(UUID().uuidString + ".cineo", isDirectory: true)
+        let width = sourcePixelWidth, height = sourcePixelHeight
+        let length = duration, name = title
+        isSavingProject = true
+        status = "Copio il video nel progetto Cineo senza modificare l'originale…"
+        Task {
+            do {
+                let manifest = try await Task.detached(priority: .userInitiated) {
+                    try CineoRecordingImporter().createProject(
+                        from: source, at: location,
+                        width: width, height: height,
+                        durationSeconds: length, title: name
+                    )
+                }.value
+                let savedSource = location.appendingPathComponent(manifest.sources[0].relativePath)
+                projectURL = location
+                sourceURL = savedSource
+                if savePlan() {
+                    status = "Progetto Cineo salvato: \(location.lastPathComponent)"
+                }
+            } catch {
+                status = "Salvataggio progetto fallito: \(error.localizedDescription). Il video originale è intatto."
+            }
+            isSavingProject = false
         }
     }
 
@@ -102,6 +168,7 @@ final class CineoEditorModel: ObservableObject {
         previewTask = nil
         preview = nil
         sourceURL = nil
+        projectURL = nil
         status = ""
     }
 
@@ -237,6 +304,7 @@ final class CineoEditorModel: ObservableObject {
     }
 
     private var planURL: URL? {
+        if let projectURL { return projectURL.appendingPathComponent("scene.json") }
         guard let sourceURL else { return nil }
         let hash = SHA256.hash(data: Data(sourceURL.standardizedFileURL.path.utf8))
             .map { String(format: "%02x", $0) }.joined()
@@ -245,16 +313,19 @@ final class CineoEditorModel: ObservableObject {
         return dir.appendingPathComponent(hash + ".json")
     }
 
-    private func savePlan() {
-        guard let url = planURL else { return }
+    @discardableResult
+    private func savePlan() -> Bool {
+        guard let url = planURL else { return false }
         do {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true
             )
             let data = try JSONEncoder().encode(currentPlan)
             try data.write(to: url, options: .atomic)
+            return true
         } catch {
             status = "Modifiche non salvate: \(error.localizedDescription)"
+            return false
         }
     }
 
@@ -373,7 +444,7 @@ struct CineoManualEditorView: View {
         VStack(alignment: .leading, spacing: 13) {
             HStack {
                 Button("‹ Registrazione") { onClose() }
-                    .disabled(editor.isExporting)
+                    .disabled(editor.isExporting || editor.isSavingProject)
                 Text("Cineo Studio").font(.title2.bold())
                 Spacer()
                 Picker("Modalità", selection: Binding(
@@ -385,8 +456,20 @@ struct CineoManualEditorView: View {
                 }
                 .frame(width: 250)
             }
-            Text(editor.title).font(.caption).foregroundStyle(.secondary)
-                .lineLimit(1)
+            HStack {
+                Text(editor.title).font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                if editor.projectURL == nil {
+                    Button("Salva progetto Cineo") { editor.saveAsProject() }
+                        .disabled(editor.isSavingProject || editor.isExporting)
+                } else {
+                    Label("Progetto .cineo", systemImage: "checkmark.seal")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+                if editor.isSavingProject { ProgressView().controlSize(.small) }
+            }
             HStack(alignment: .top, spacing: 18) {
                 VStack(spacing: 10) {
                     GeometryReader { geo in
