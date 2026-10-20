@@ -14,6 +14,21 @@ bash scripts/test-cineo.sh --preflight
 
 Se hai già clonato il repository, aggiorna prima il codice con `git pull --ff-only origin main` sulla copia di lavoro pulita.
 
+## Problema frequente: Command Line Tools selezionati al posto di Xcode
+
+Se `xcode-select -p` restituisce `/Library/Developer/CommandLineTools`, `xcodebuild` non può compilare Cineo e anche `swift test` può segnalare `no such module 'Testing'`. **Non installare di nuovo Swift e non modificare il codice** prima di correggere il percorso del developer toolchain:
+
+```bash
+ls -d /Applications/Xcode*.app 2>/dev/null
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+xcode-select -p
+xcodebuild -version
+```
+
+Se `Xcode.app` non esiste, installa **Xcode completo** prima di eseguire `--quick` o `--native`. Se Xcode chiede una configurazione iniziale o di accettare la licenza, apri l'app e completa la procedura, oppure usa `sudo xcodebuild -runFirstLaunch`. Se usi un nome differente (es. `Xcode_26.6.app`), modifica il percorso nel comando `--switch`. Controlla anche eventuali override `DEVELOPER_DIR`.
+
+**Lo script ora fallisce subito** se trova soltanto Command Line Tools: non scarica Orbit, non inizia i test Swift con toolchain incomplete e stampa una diagnosi utile. Dopo la correzione, esegui in ordine `--preflight`, `--quick` e `--native`. Non occorre cancellare la directory temporanea di Orbit, già scaricata.
+
 ## Modalità
 
 | Cosa vuoi verificare | Comando | Cosa dimostra |
