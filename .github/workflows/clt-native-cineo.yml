@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'Apps/Cineo/**'
+      - 'Apps/CineoCLTSmoke/**'
       - 'scripts/swift-test-clt.sh'
       - 'scripts/test-cineo.sh'
       - 'Packages/CineoDirector/**'
@@ -15,6 +16,7 @@ on:
     branches: [main]
     paths:
       - 'Apps/Cineo/**'
+      - 'Apps/CineoCLTSmoke/**'
       - 'scripts/swift-test-clt.sh'
       - 'scripts/test-cineo.sh'
       - 'Packages/CineoDirector/**'
@@ -57,15 +59,15 @@ jobs:
           codesign --verify --strict "$CINEO_CLT_BUILD_ROOT/Cineo.app"
           echo "Native Cineo app packaged under standalone CLT."
 
-  clt-swift-tests:
-    name: Swift Testing using Command Line Tools only
+  clt-core-smoke:
+    name: Core algorithm smoke without Swift Testing macros (CLT only)
     runs-on: macos-26
     timeout-minutes: 25
     env:
       DEVELOPER_DIR: /Library/Developer/CommandLineTools
     steps:
       - uses: actions/checkout@v4
-      - name: Run all three Swift Testing suites without Xcode
+      - name: Run camera project edit algorithm smoke without Xcode
         run: |
           set -euo pipefail
           test "$(xcode-select -p)" = /Library/Developer/CommandLineTools
