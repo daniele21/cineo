@@ -35,6 +35,14 @@ open "${TMPDIR:-/tmp}/cineo-clt-proof/CineoCLTProof.app"
 - [x] Bundle creation, `plutil -lint`, `codesign --sign -` and `codesign --verify --strict` passed, without calling `xcodebuild`.
 - [ ] Local CLT 6.3.3 (user host), Swift Testing compatibility, app launch and any real capture/preview/export remain unverified.
 
+## Second milestone: CLT-native Cineo Capture Alpha
+
+The [Cineo app Swift package](../../Apps/Cineo) and [native package script](../../scripts/build-cineo-clt.sh) now compile under macOS CI with `DEVELOPER_DIR=/Library/Developer/CommandLineTools`. It uses `SCShareableContent`, `SCStream` and `SCRecordingOutput` to **attempt real screen recording on the physical Mac only when the Record button is clicked**, and writes H.264 MP4 to `~/Movies/Cineo`. It does not require Xcode.app or an Apple Developer team for local ad-hoc signing.
+
+**This is NOT full Orbit editor parity.** The new Capture Alpha has no audio, cursor input-event sidecar, timeline or cinematic zooms. The source remains local-first. CI establishes only compilation and packaging; **permission grant, capture success and playable MP4 are still unverified until a person launches the app on macOS**. The former Orbit-based build is explicitly a legacy path.
+
+`swift test` on CLT-only runners sometimes finds `Testing.framework` but fails loading `TestingMacros`. The default macOS `--quick` command therefore runs a standalone SwiftPM smoke executable against Director/Project/EditPlanner; the full Swift Testing regression suites remain on Linux CI. This distinction is intentional rather than masking failures.
+
 ## Acceptance and migration steps
 
 1. CI: ensure `xcode-select -p` is the CLT directory and `swift build` produces a runnable-signable bundle. If CI fails, fix the actual CLT compatibility limitation rather than silently selecting full Xcode.
