@@ -68,6 +68,22 @@ On **Stop**, the app calls `SCStream.stopCapture()` **without separately removin
 
 The macOS unified logging subsystem is `com.daniele21.cineo.capturealpha`, category `recording`, with user-specific text logged private by default. The on-screen activity log is always local. The app does not record keyboard input or microphone/system audio in this alpha.
 
+## Try the manual and assisted post-production editor (PR #55)
+
+This section describes the **candidate editor branch**, not features already merged to `main`. No Xcode.app is required. Work in the same checkout: `~/Personal/cineo`; never create a detached worktree solely to try the editor.
+
+1. Quit every Cineo window using **Command-Q** (the builder refuses to replace running apps). Run `git status --short`, protect any uncommitted work, and `git fetch origin`.
+2. Switch to `feat/cineo-interactive-editor`, tracking `origin/feat/cineo-interactive-editor` if it does not yet exist locally. This branch contains the still-unmerged fixed recorder, persistent identity and the editor.
+3. Run `bash scripts/test-cineo.sh --interactive`. It recompiles and opens the **only** `~/Applications/Cineo Dev.app` using the same bundle ID and certificate; it does not install Xcode.
+4. Click **Modifica MP4…** from the dashboard and select an already recorded video, or complete a new recording and choose **Apri editor**.
+5. Select **Manuale** to scrub the source timeline, click directly on a rendered preview frame to set the focus, tune the 1–2.5× zoom and center XY, select background/margins/16:9 or 9:16. Camera keyframes appear as clickable timeline markers. The editor writes an **edit recipe** to `~/Movies/Cineo/Edits/` without modifying the original footage.
+6. Select **Assistito** and select a point of interest in the preview, then **Suggerisci zoom qui**. Cineo generates an editable zoom-in/hold/zoom-out motion around the selected time; this does **not** claim to detect recorded clicks or understand screen content automatically.
+7. Press **Esporta MP4**, monitor the real progress indicator, then **Mostra MP4**. A new MP4 appears in `~/Movies/Cineo/Edited/` after AVFoundation verification; the original file is retained.
+
+**Known MVP limitations:** preview evaluates a real **individual composed frame** at the selected timeline position, not continuous edited-video playback yet. Automatic click detection and semantic storyboard generation are not implemented in this branch, and the current recorder has no audio. Only unrotated/supported sources accepted by the Core Image prototype exporter can be opened. No claim of complete production readiness until physical-Mac UI test + QuickTime output review. CI build and a synthetic encoded H.264 test are separate evidence.
+
+To exit safely, close Cineo; switch branches as needed. Never manually clear Screen Recording grants or delete `Cineo Dev.app` just to open this prototype.
+
 ## Important verification limit
 
 CLT GitHub Actions verifies **compilation and bundle signing** only. It cannot demonstrate Screen Recording permission prompts, ScreenCaptureKit delegate delivery, stop behavior or a real MP4. These need a physical Mac smoke. If stuck in `Finalizing MP4`, note the time and latest Activity log lines and check `~/Movies/Cineo/`; source material is not deleted by the app.
