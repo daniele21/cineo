@@ -71,4 +71,21 @@ struct CineoAutoZoomBridgeTests {
         #expect(segments.allSatisfy { $0.range.lowerBound >= 0 && $0.range.upperBound <= 10 })
         #expect(segments.count <= 1)
     }
+    @Test func editorCameraPresetsChangeZoomStrengthWithoutChangingTimingBase() {
+        let input = telemetry(clicks: [
+            (2, CGPoint(x: 600, y: 450)),
+            (2.1, CGPoint(x: 603, y: 450))
+        ])
+        let subtle = CineoAutoZoomBridge.segments(for: input, duration: 10, preset: .subtle)
+        let balanced = CineoAutoZoomBridge.segments(for: input, duration: 10, preset: .balanced)
+        let dynamic = CineoAutoZoomBridge.segments(for: input, duration: 10, preset: .dynamic)
+        #expect(subtle.count == 1)
+        #expect(balanced.count == 1)
+        #expect(dynamic.count == 1)
+        #expect(subtle[0].scale == 1.25)
+        #expect(balanced[0].scale == 1.4)
+        #expect(dynamic[0].scale == 1.65)
+        #expect(subtle[0].isAutomatic && dynamic[0].isAutomatic)
+    }
+
 }
