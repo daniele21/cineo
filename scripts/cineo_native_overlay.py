@@ -58,8 +58,8 @@ def apply_overlay(root: Path) -> None:
     # Never ship Orbit's icon as a Cineo brand identity.
     # App product name can differ from its Swift import module. Upstream
     # @testable import Reco stays valid while bundled app is called Cineo.
-    app_product_line = "PRODUCT_NAME = Cineo;\\n\\t\\t\\t\\tREGISTER_APP_GROUPS = YES;"
-    module_line = "PRODUCT_NAME = Cineo;\\n\\t\\t\\t\\tPRODUCT_MODULE_NAME = Reco;\\n\\t\\t\\t\\tREGISTER_APP_GROUPS = YES;"
+    app_product_line = "PRODUCT_NAME = Cineo;\n\t\t\t\tREGISTER_APP_GROUPS = YES;"
+    module_line = "PRODUCT_NAME = Cineo;\n\t\t\t\tPRODUCT_MODULE_NAME = Reco;\n\t\t\t\tREGISTER_APP_GROUPS = YES;"
     pbx = replace_exact(pbx, app_product_line, module_line, 2)
     old_test_host = 'TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Reco.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Reco";'
     new_test_host = 'TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cineo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cineo";'
