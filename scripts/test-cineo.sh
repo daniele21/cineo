@@ -11,7 +11,7 @@ usage() {
   cat <<'EOF'
 Cineo macOS tests — default build uses CLT + SwiftPM, no Xcode.app
   bash scripts/test-cineo.sh --preflight    Check macOS Command Line Tools.
-  bash scripts/test-cineo.sh --quick        Run Swift Testing with CLT paths.
+  bash scripts/test-cineo.sh --quick        Run CLT smoke for Director/Project/Timeline.
   bash scripts/test-cineo.sh --native       Compile Cineo Capture Alpha using CLT.
   bash scripts/test-cineo.sh --interactive  Build + open local ad-hoc-signed Cineo.
   bash scripts/test-cineo.sh --exports --landscape "/path/video16x9.mp4"
@@ -50,12 +50,18 @@ preflight() {
   printf 'No Xcode.app or Apple Developer Team required.\n'
 }
 quick() {
-  if [[ "$(uname -s)" == Darwin ]]; then configure_clt; fi
-  for name in CineoDirector CineoProject CineoEditPlanner; do
-    printf '\n== Testing %s ==\n' "$name"
-    bash scripts/swift-test-clt.sh --package-path "Packages/$name"
-  done
-  printf '\nPASS: Swift project, camera and edit-planner tests.\n'
+  if [[ "$(uname -s)" == Darwin ]]; then
+    configure_clt
+    echo 'Running native CLT smoke checks (no Swift Testing macro dependency).'
+    swift run --package-path Apps/CineoCLTSmoke --configuration release cineo-clt-smoke
+    echo 'Full Swift Testing regression suites are verified separately on Linux CI.'
+  else
+    for name in CineoDirector CineoProject CineoEditPlanner; do
+      printf '\n== Testing %s ==\n' "$name"
+      swift test --package-path "Packages/$name"
+    done
+    echo 'PASS: all three full Swift Testing suites.'
+  fi
 }
 native() {
   configure_clt
