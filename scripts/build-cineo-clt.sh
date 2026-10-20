@@ -6,7 +6,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE="$ROOT/Apps/Cineo"
 BUILD_ROOT="${CINEO_CLT_BUILD_ROOT:-${TMPDIR:-/tmp}/cineo-clt-native}"
-APP="$BUILD_ROOT/Cineo.app"
+# Isolated real-Mac regression build for the stop/finalization candidate.
+# Keep regular Cineo's bundle identity and TCC settings untouched.
+if [[ "${CINEO_CLT_ISOLATED_CAPTURE:-0}" == "1" ]]; then
+  APP="$BUILD_ROOT/Cineo Stop Fix.app"
+  STAGE="$BUILD_ROOT/Cineo Stop Fix.stage.app"
+else
+  APP="$BUILD_ROOT/Cineo.app"
+  STAGE="$BUILD_ROOT/Cineo.stage.app"
+fi
 
 [[ "$(uname -s)" == Darwin ]] || { echo "Cineo native app requires macOS" >&2; exit 2; }
 for executable in swift xcrun xcode-select plutil codesign; do
@@ -33,7 +41,6 @@ BIN_DIR="$(swift build --package-path "$PACKAGE" --configuration release --show-
 
 # Build in a temporary staging directory, then atomically replace only the
 # generated app folder. Do not remove or read user's media.
-STAGE="$BUILD_ROOT/Cineo.stage.app"
 mkdir -p "$BUILD_ROOT"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
@@ -56,6 +63,13 @@ cat > "$STAGE/Contents/Info.plist" <<'EOF'
   <string>Cineo records your selected screen only when you click Record. Videos remain on this Mac.</string>
 </dict></plist>
 EOF
+if [[ "${CINEO_CLT_ISOLATED_CAPTURE:-0}" == "1" ]]; then
+  # Separate app identity ensures LaunchServices and the macOS permission UI
+  # cannot silently conflate this candidate with the old Cineo build.
+  plutil -replace CFBundleIdentifier -string "com.daniele21.cineo.capturealpha.stopfix" "$STAGE/Contents/Info.plist"
+  plutil -replace CFBundleName -string "Cineo Stop Fix" "$STAGE/Contents/Info.plist"
+  plutil -replace CFBundleDisplayName -string "Cineo Stop Fix" "$STAGE/Contents/Info.plist"
+fi
 plutil -lint "$STAGE/Contents/Info.plist"
 
 # Ad-hoc signing for local experimentation only. For repeatable TCC identity
