@@ -1,6 +1,6 @@
 # Decision experiment: build native macOS Cineo without Xcode.app
 
-**Status:** Experimental; compile feasibility pending CI. Owner goal: **no full Xcode installation required** for Cineo developers. Apple Command Line Tools (CLT), Swift compiler and macOS SDK remain required because Cineo uses SwiftUI, ScreenCaptureKit and AVFoundation.
+**Status:** CLT-only compile-and-sign feasibility **proven** in [macOS GitHub Actions run #39407952382](https://github.com/daniele21/cineo/actions/runs/39407952382), using **Apple Command Line Tools Swift 6.4**. Existing full Cineo/Orbit app remains Xcode-dependent until migrated. Owner goal: **no full Xcode installation required** for Cineo developers. Apple Command Line Tools (CLT), Swift compiler and macOS SDK remain required because Cineo uses SwiftUI, ScreenCaptureKit and AVFoundation.
 
 ## Why the previous Cineo bootstrap fails
 
@@ -27,6 +27,13 @@ open "${TMPDIR:-/tmp}/cineo-clt-proof/CineoCLTProof.app"
 ```
 
 **What proof would establish:** compilation against macOS frameworks and packaging/ad-hoc signing with no full Xcode toolchain selected. **What it does not establish:** running Orbit recording code, app launch on the user's host, Screen Recording/TCC, synchronous audio, actual video export, hardened signing, notarization or release readiness.
+
+## Observed evidence and limits
+
+- [x] CI explicitly selected `/Library/Developer/CommandLineTools` for the developer directory and `/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk` for the SDK.
+- [x] `swift build` compiled the small native SwiftUI app importing ScreenCaptureKit and AVFoundation.
+- [x] Bundle creation, `plutil -lint`, `codesign --sign -` and `codesign --verify --strict` passed, without calling `xcodebuild`.
+- [ ] Local CLT 6.3.3 (user host), Swift Testing compatibility, app launch and any real capture/preview/export remain unverified.
 
 ## Acceptance and migration steps
 
