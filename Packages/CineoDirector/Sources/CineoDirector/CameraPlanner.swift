@@ -36,7 +36,7 @@ public struct CameraPlanner: Sendable {
         public var maximumClusterDuration: Double = 3.0
         /// Avoid repeated camera movement on the same unchanged control.
         public var duplicateSuppressionTime: Double = 2.0
-        public var duplicateSpatialDistance: Double = 0.06
+        public var duplicateSpatialDistance: Double = 0.12
         public var leadTime: Double = 0.35
         public var holdTime: Double = 1.2
         public var minimumShotLength: Double = 0.8
