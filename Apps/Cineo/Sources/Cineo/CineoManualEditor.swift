@@ -38,6 +38,7 @@ final class CineoEditorModel: ObservableObject {
     @Published var outputURL: URL?
     @Published var keyframes: [CineoCameraKeyframe] = []
     @Published private(set) var importedActionMarkers: [ImportedActionMarker] = []
+    @Published var showingInstructions = false
 
     struct ImportedActionMarker: Identifiable {
         let id: String
@@ -507,7 +508,6 @@ final class CineoEditorModel: ObservableObject {
 struct CineoManualEditorView: View {
     @ObservedObject var editor: CineoEditorModel
     let onClose: () -> Void
-    @State private var showingInstructions = false
 
     private func control(_ getter: @escaping () -> Double,
                          _ setter: @escaping (Double) -> Void) -> Binding<Double> {
@@ -555,7 +555,7 @@ struct CineoManualEditorView: View {
                 .disabled(editor.isExporting || editor.isSavingProject || editor.sourceURL == nil)
                 .help("Importa azioni camera.zoom, camera.keyframe e stile da JSON.")
                 Button {
-                    showingInstructions = true
+                    editor.showingInstructions = true
                 } label: {
                     Label("Mostra istruzioni", systemImage: "curlybraces")
                 }
@@ -719,7 +719,10 @@ struct CineoManualEditorView: View {
         }
         .padding(20)
         .frame(minWidth: 1040, minHeight: 580)
-        .sheet(isPresented: $showingInstructions) {
+        .sheet(isPresented: Binding(
+            get: { editor.showingInstructions },
+            set: { editor.showingInstructions = $0 }
+        )) {
             CineoInstructionsDialog(editor: editor)
         }
     }
@@ -729,17 +732,22 @@ struct CineoManualEditorView: View {
 /// Read-only representation of the actual scene, not a speculative semantic
 /// reconstruction. "Current" is regenerated from the scene each time the
 /// observed editor changes; it is also importable through the existing UI.
-private struct CineoInstructionsDialog: View {
-    @ObservedObject var editor: CineoEditorModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var tab: Tab = .current
-    @State private var feedback = ""
-
-    private enum Tab: String, CaseIterable {
+@MainActor
+private final class CineoInstructionsDialogState: ObservableObject {
+    enum Tab: String, CaseIterable {
         case current = "Montaggio attuale"
         case guide = "Guida"
         case examples = "Esempi"
     }
+
+    @Published var tab: Tab = .current
+    @Published var feedback = ""
+}
+
+private struct CineoInstructionsDialog: View {
+    @ObservedObject var editor: CineoEditorModel
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var dialog = CineoInstructionsDialogState()
 
     private var currentJSON: String? {
         try? CineoInstructionDocument.equivalentJSON(
@@ -810,15 +818,15 @@ private struct CineoInstructionsDialog: View {
                 Spacer()
                 Button("Chiudi") { dismiss() }
             }
-            Picker("Sezione", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { option in
+            Picker("Sezione", selection: $dialog.tab) {
+                ForEach(CineoInstructionsDialogState.Tab.allCases, id: \.self) { option in
                     Text(option.rawValue).tag(option)
                 }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             Group {
-                switch tab {
+                switch dialog.tab {
                 case .current: currentContent
                 case .guide: guideContent
                 case .examples: examplesContent
@@ -828,19 +836,19 @@ private struct CineoInstructionsDialog: View {
 
             Divider()
             HStack {
-                Text(feedback.isEmpty
+                Text(dialog.feedback.isEmpty
                      ? "L'originale rimane intatto: il JSON descrive solo il montaggio."
-                     : feedback)
+                     : dialog.feedback)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .textSelection(.enabled)
                 Spacer()
-                if tab == .current, let json = currentJSON {
+                if dialog.tab == .current, let json = currentJSON {
                     Button("Copia JSON") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(json, forType: .string)
-                        feedback = "JSON del montaggio copiato."
+                        dialog.feedback = "JSON del montaggio copiato."
                     }
                     Button("Salva JSON…") {
                         let panel = NSSavePanel()
@@ -849,24 +857,24 @@ private struct CineoInstructionsDialog: View {
                         if panel.runModal() == .OK, let destination = panel.url {
                             do {
                                 try Data(json.utf8).write(to: destination, options: .atomic)
-                                feedback = "Istruzioni salvate: \(destination.lastPathComponent)"
+                                dialog.feedback = "Istruzioni salvate: \(destination.lastPathComponent)"
                             } catch {
-                                feedback = "Salvataggio fallito: \(error.localizedDescription)"
+                                dialog.feedback = "Salvataggio fallito: \(error.localizedDescription)"
                             }
                         }
                     }
                     .buttonStyle(.borderedProminent)
                 }
-                if tab == .examples {
+                if dialog.tab == .examples {
                     Button("Copia esempio zoom") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(exampleZoom, forType: .string)
-                        feedback = "Esempio zoom copiato. Salvalo come .json e importalo in Studio."
+                        dialog.feedback = "Esempio zoom copiato. Salvalo come .json e importalo in Studio."
                     }
                     Button("Copia esempio keyframe") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(exampleKeyframe, forType: .string)
-                        feedback = "Esempio keyframe copiato. Salvalo come .json e importalo in Studio."
+                        dialog.feedback = "Esempio keyframe copiato. Salvalo come .json e importalo in Studio."
                     }
                 }
             }
