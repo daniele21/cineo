@@ -205,6 +205,23 @@ final class CineoEditorModel: ObservableObject {
         if let existing = keyframes.firstIndex(where: { abs($0.time - frame.time) < 0.05 }) {
             keyframes[existing] = frame
         } else {
+            // Without a transition keyframe, a single zoom at 15 seconds
+            // would ease all the way from 0 to 15 seconds (poor demo motion).
+            // Hold the prior view until 0.4s before the requested keyframe.
+            let leadInTime = frame.time - 0.4
+            if leadInTime > 0,
+               !keyframes.contains(where: { abs($0.time - leadInTime) < 0.06 }),
+               let previous = keyframes.filter({ $0.time < frame.time }).last,
+               previous.time < leadInTime - 0.02 {
+                keyframes.append(CineoCameraKeyframe(
+                    time: leadInTime, zoom: previous.zoom,
+                    focusX: previous.focusX, focusY: previous.focusY
+                ))
+            } else if leadInTime > 0 && keyframes.isEmpty {
+                keyframes.append(CineoCameraKeyframe(
+                    time: leadInTime, zoom: 1, focusX: 0.5, focusY: 0.5
+                ))
+            }
             keyframes.append(frame)
         }
         keyframes.sort { $0.time < $1.time }
@@ -403,6 +420,20 @@ struct CineoManualEditorView: View {
                     }
                     Text("Seleziona un momento nella timeline, poi clicca sull'anteprima per scegliere il punto d'interesse.")
                         .font(.caption).foregroundStyle(.secondary)
+                    if !editor.keyframes.isEmpty {
+                        ScrollView(.horizontal) {
+                            HStack(spacing: 6) {
+                                Text("Keyframe").font(.caption.weight(.semibold))
+                                ForEach(editor.keyframes, id: \.time) { key in
+                                    Button(String(format: "%0.1fs · %.1f×", key.time, key.zoom)) {
+                                        editor.scrub(key.time)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .font(.caption)
+                                }
+                            }
+                        }
+                    }
                 }
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Inquadratura").font(.headline)
