@@ -2,6 +2,43 @@
 
 This native SwiftPM macOS target builds with `bash scripts/test-cineo.sh --native`, using Apple Command Line Tools without Xcode.app. Launch with `bash scripts/test-cineo.sh --interactive`.
 
+## Stable Screen Recording permissions (local development)
+
+The CLT-only build uses **persistent certificate-based signing** by default, not
+`codesign --sign -`. Run `bash scripts/test-cineo.sh --interactive` for Cineo
+or `bash scripts/test-cineo.sh --isolated-capture` for the stop-fix candidate.
+There is no Xcode.app or paid Apple Developer account requirement.
+
+- **First use:** `scripts/ensure-cineo-signing.sh` creates one local code-signing
+  certificate with a private key stored in the macOS **login Keychain**.
+  Its public SHA-1 fingerprint is pinned at
+  `~/Library/Application Support/Cineo/signing/identity.sha1`.
+  Initial Keychain authorization may be required.
+- **Every later build:** the exact same pinned certificate is selected by SHA-1,
+  and the signed app uses a stable bundle identifier and a durable path:
+  `~/Library/Application Support/Cineo/Builds/Cineo.app`, or
+  `Cineo Stop Fix.app` for the isolated diagnostic variant. The build checks
+  that the designated requirement is not tied to a `cdhash`.
+- **If the signing identity is lost/expired:** the build fails with an actionable
+  error instead of silently creating a different certificate or reverting to
+  ad-hoc signing. Preserve the Keychain identity when migrating Macs.
+- **Optional:** select a pre-existing valid code-signing identity *before first
+  use* with `CINEO_SIGNING_IDENTITY=<SHA1 fingerprint>`. This is also pinned.
+- **CI only:** `CINEO_SIGNING_MODE=adhoc` permits isolated GitHub Actions builds
+  without any shared private signing keys. Never use ad-hoc for local permission
+  testing: macOS may require authorization after every binary change.
+
+Switching **once** from the previous ad-hoc app to the newly certificate-signed
+app can require approving Screen Recording again. Likewise, Cineo and
+Cineo Stop Fix deliberately have **different bundle IDs** and therefore
+separate permission grants. Rebuilds *within* each signed variant should keep
+their grants as long as the certificate and bundle ID stay unchanged.
+
+The local certificate is **not Developer ID**: it does not notarize the app or
+provide distribution-grade Gatekeeper trust. A future release needs an Apple
+Developer-issued Developer ID identity. Signature stability does not by itself
+prove ScreenCaptureKit recording/finalization correctness.
+
 ## What the screen now displays
 
 Cineo deliberately exposes the complete capture state transition:
