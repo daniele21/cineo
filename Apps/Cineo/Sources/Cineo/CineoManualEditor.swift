@@ -36,6 +36,7 @@ final class CineoEditorModel: ObservableObject {
 
     private var previewTask: Task<Void, Never>?
     private var previewRequest = UUID()
+    private var exportTask: Task<Void, Never>?
 
     var outputWidth: Int { portrait ? 1080 : 1920 }
     var outputHeight: Int { portrait ? 1920 : 1080 }
@@ -93,6 +94,10 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func close() {
+        guard !isExporting else {
+            status = "Termina o annulla l'esportazione prima di chiudere l'editor."
+            return
+        }
         previewTask?.cancel()
         previewTask = nil
         preview = nil
@@ -148,9 +153,10 @@ final class CineoEditorModel: ObservableObject {
     func applySuggestedZoom() {
         let at = selectedTime
         let start = max(0, at - 0.45)
-        let peak = min(max(0, duration - 0.10), at + 0.40)
-        let end = min(max(0, duration - 0.02), at + 2.20)
-        guard end > peak, peak > start else {
+        let peak = at + 0.40
+        let hold = at + 1.20
+        let end = at + 2.20
+        guard end < duration - 0.02, hold > peak, peak > start else {
             status = "Scegli un punto meno vicino alla fine del video."
             return
         }
@@ -163,6 +169,7 @@ final class CineoEditorModel: ObservableObject {
         keyframes.append(contentsOf: [
             .init(time: start, zoom: 1, focusX: 0.5, focusY: 0.5),
             .init(time: peak, zoom: 1.45, focusX: fx, focusY: fy),
+            .init(time: hold, zoom: 1.45, focusX: fx, focusY: fy),
             .init(time: end, zoom: 1, focusX: 0.5, focusY: 0.5)
         ])
         keyframes.sort { $0.time < $1.time }
@@ -323,7 +330,7 @@ final class CineoEditorModel: ObservableObject {
         exportProgress = 0
         outputURL = nil
         status = "Esportazione in corso: nessun file sorgente verrà modificato."
-        Task {
+        exportTask = Task {
             do {
                 try await CineoSceneExporter().export(
                     source: url, destination: dest, plan: plan
@@ -332,11 +339,20 @@ final class CineoEditorModel: ObservableObject {
                 }
                 outputURL = dest
                 status = "MP4 esportato e verificato: \(dest.lastPathComponent)"
+            } catch is CancellationError {
+                status = "Esportazione annullata. Il video originale è intatto."
             } catch {
                 status = "Esportazione fallita, sorgente preservata: \(error.localizedDescription)"
             }
             isExporting = false
+            exportTask = nil
         }
+    }
+
+    func cancelExport() {
+        guard isExporting else { return }
+        status = "Annullamento esportazione richiesto…"
+        exportTask?.cancel()
     }
 
     func showExport() {
@@ -357,6 +373,7 @@ struct CineoManualEditorView: View {
         VStack(alignment: .leading, spacing: 13) {
             HStack {
                 Button("‹ Registrazione") { onClose() }
+                    .disabled(editor.isExporting)
                 Text("Cineo Studio").font(.title2.bold())
                 Spacer()
                 Picker("Modalità", selection: Binding(
@@ -496,6 +513,7 @@ struct CineoManualEditorView: View {
                     .lineLimit(2)
                 Spacer()
                 if editor.isExporting {
+                    Button("Annulla export") { editor.cancelExport() }
                     ProgressView(value: editor.exportProgress)
                         .frame(width: 140)
                     Text("\(Int(editor.exportProgress * 100))%")
