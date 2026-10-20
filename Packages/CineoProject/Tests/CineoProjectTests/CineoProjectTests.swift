@@ -21,7 +21,7 @@ struct CineoProjectTests {
         #expect(try TimelineMapper.source(at: 2, in: project)?.sourceTime == 10)
         #expect(try TimelineMapper.source(at: 9.9, in: project)?.sourceTime == 17.9)
         #expect(try TimelineMapper.source(at: 10, in: project) == nil)
-        #expect(try TimelineMapper.source(at: -.1, in: project) == nil)
+        #expect(try TimelineMapper.source(at: -0.1, in: project) == nil)
         #expect(try TimelineMapper.source(at: .nan, in: project) == nil)
     }
 
