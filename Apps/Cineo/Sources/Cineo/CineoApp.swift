@@ -58,6 +58,10 @@ struct CaptureLogEntry: Identifiable {
 private struct CaptureDashboard: View {
     @ObservedObject var recorder: CineoScreenRecorder
 
+    private var buildRevision: String {
+        Bundle.main.object(forInfoDictionaryKey: "CineoSourceCommit") as? String ?? "unknown"
+    }
+
     private var timeText: String {
         let total = Int(recorder.recordedSeconds)
         return String(format: "%02d:%02d", total / 60, total % 60)
@@ -78,6 +82,13 @@ private struct CaptureDashboard: View {
                     Text("Cineo").font(.title.bold())
                     Text("Local-first screen capture • SwiftPM + Command Line Tools")
                         .foregroundStyle(.secondary)
+                    Text("Capture fix candidate • stream-stop finalization")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("SOURCE \(buildRevision) • PID \(ProcessInfo.processInfo.processIdentifier)")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
                 }
             }
             Divider()
@@ -241,6 +252,11 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
     override init() {
         super.init()
         log("Ready. Nothing is being recorded.")
+        log("Build variant: stream-stop finalization (fix/screencapture-stop-finalization-race).")
+        let revision = Bundle.main.object(forInfoDictionaryKey: "CineoSourceCommit") as? String ?? "unknown"
+        let bundleID = Bundle.main.bundleIdentifier ?? "unknown"
+        log("Runtime identity: SOURCE=\(revision) PID=\(ProcessInfo.processInfo.processIdentifier) BUNDLE=\(bundleID)")
+        log("Running app location: \(Bundle.main.bundleURL.path)")
     }
 
     private var recordingsDirectory: URL {
@@ -365,27 +381,29 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
     func stop() async {
         guard phase == .recording, let activeStream = stream,
               let activeOutput = output else { return }
+        let durationAtStop = CMTimeGetSeconds(activeOutput.recordedDuration)
+        let bytesAtStop = activeOutput.recordedFileSize
+        log("Recording state before Stop: duration=\(durationAtStop.isFinite ? String(format: "%.2f", durationAtStop) : "invalid")s, bytes=\(bytesAtStop).")
         phase = .finalizing
         finalizationStarted = Date()
         finalizationElapsedSeconds = 0
-        status = "Stopping recording and finalizing the MP4…"
-        log("Stop requested. Asking ScreenCaptureKit to finalize output.")
+        status = "Stopping capture and finalizing the MP4…"
+        log("Stop requested. Stopping the stream and keeping the recording output attached.")
         monitor()
 
         do {
-            // Removing SCRecordingOutput is the explicit finalization route:
-            // SCRecordingOutputDelegate reports when the file is finished.
-            try activeStream.removeRecordingOutput(activeOutput)
-            log("Recording output removed. Waiting for finalization delegate.")
+            // Per ScreenCaptureKit's SCStream contract, stopCapture also stops
+            // an attached SCRecordingOutput and finalizes the movie. Do not
+            // removeRecordingOutput immediately beforehand: competing stop
+            // paths can invalidate the recording connection during teardown.
+            // Retain both objects until the output's delegate completes.
             try await activeStream.stopCapture()
-            stream = nil
             if phase == .finalizing {
-                log("Capture stream stopped. MP4 is not yet confirmed.")
-                status = "Capture stopped; waiting for MP4 finalization confirmation…"
+                log("Capture stream stopped. Awaiting the MP4 finalization callback.")
+                status = "Capture stopped; waiting for MP4 verification…"
             }
         } catch {
-            stream = nil
-            fail("Unable to stop recording safely: \(error.localizedDescription)")
+            fail("Unable to stop capture safely: \(error.localizedDescription)")
         }
     }
 
@@ -413,6 +431,7 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
             recordedSeconds = duration
             recordedBytes = bytes
             lastCompletedVideo = url
+            stream = nil
             output = nil
             targetURL = nil
             finalizationStarted = nil
@@ -469,21 +488,34 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
 
     nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: any Error) {
         let id = ObjectIdentifier(recordingOutput)
-        let message = error.localizedDescription
+        let nsError = error as NSError
+        let message = "\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
         Task { @MainActor [weak self] in
             guard let self, let output = self.output,
                   ObjectIdentifier(output) == id else { return }
             self.stream = nil
+            self.output = nil
             self.fail("Recording output failed: \(message)")
         }
     }
 
     nonisolated func stream(_ stream: SCStream, didStopWithError error: any Error) {
-        let message = error.localizedDescription
+        let id = ObjectIdentifier(stream)
+        let nsError = error as NSError
+        let message = "\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
         Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.stream = nil
-            self.fail("Screen capture stopped unexpectedly: \(message)")
+            guard let self, let activeStream = self.stream,
+                  ObjectIdentifier(activeStream) == id else { return }
+            if self.phase == .finalizing || self.phase == .verifying {
+                // An intentional stop may deliver a late stream error while
+                // SCRecordingOutput is still finalizing. The recording delegate
+                // and verified MP4 determine whether the recording succeeded.
+                self.log("Stream interruption during finalization: \(message). Waiting for recording result.", level: .warning)
+            } else if self.phase == .preparing || self.phase == .recording {
+                self.stream = nil
+                self.output = nil
+                self.fail("Screen capture stopped unexpectedly: \(message)")
+            }
         }
     }
 }
