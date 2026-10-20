@@ -107,12 +107,18 @@ EOF
     openssl req -new -newkey rsa:3072 -nodes -x509 -sha256 -days 3650 \
       -config "$tmp/openssl.cnf" -keyout "$tmp/private-key.pem" \
       -out "$tmp/certificate.pem" >/dev/null 2>&1
+    # macOS Security.framework may reject an empty PKCS#12 MAC password.
+    # Use a throwaway random export password; the persistent private key will
+    # live in the Keychain, not in a .p12 file after this command finishes.
+    p12_password="$(openssl rand -hex 24)"
     openssl pkcs12 -export -inkey "$tmp/private-key.pem" \
-      -in "$tmp/certificate.pem" -out "$tmp/identity.p12" -passout pass: >/dev/null 2>&1
+      -in "$tmp/certificate.pem" -out "$tmp/identity.p12" \
+      -passout "pass:$p12_password" >/dev/null 2>&1
     sha="$(openssl x509 -in "$tmp/certificate.pem" -noout -fingerprint -sha1 |
       awk -F= '{gsub(":","",$2); print toupper($2)}')"
     is_sha1 "$sha" || { echo "Unable to read signing certificate fingerprint." >&2; exit 2; }
-    security import "$tmp/identity.p12" -k "$KEYCHAIN" -P "" -T /usr/bin/codesign >&2
+    security import "$tmp/identity.p12" -k "$KEYCHAIN" -P "$p12_password" -T /usr/bin/codesign >&2
+    unset p12_password
     # Local user trust for code-signing validation (NOT Developer ID / Gatekeeper).
     # Some macOS versions need explicit user trust for a self-signed identity
     # to appear under 'security find-identity -v -p codesigning'.
