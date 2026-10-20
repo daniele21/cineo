@@ -12,8 +12,12 @@ PACKAGE="$ROOT/Apps/Cineo"
 # this default location.
 BUILD_ROOT="${CINEO_CLT_BUILD_ROOT:-$HOME/Applications}"
 APP="$BUILD_ROOT/Cineo Dev.app"
-STAGE="$BUILD_ROOT/Cineo Dev.stage.app"
 APP_BUNDLE_ID="com.daniele21.cineo.capturealpha.dev"
+# IMPORTANT: NEVER create another .app with this ID inside ~/Applications.
+# LaunchServices might index a staging .app and relaunch the wrong copy
+# right after macOS Screen Recording permission changes.
+STAGING_HOME="${CINEO_CLT_STAGE_HOME:-$HOME/Library/Caches/Cineo/build-staging}"
+STAGE=""
 
 [[ "$(uname -s)" == Darwin ]] || { echo "Cineo native app requires macOS" >&2; exit 2; }
 for executable in swift xcrun xcode-select plutil codesign; do
@@ -64,10 +68,12 @@ swift build --package-path "$PACKAGE" --configuration release
 BIN_DIR="$(swift build --package-path "$PACKAGE" --configuration release --show-bin-path)"
 [[ -x "$BIN_DIR/Cineo" ]] || { echo "Native Cineo executable not found" >&2; exit 3; }
 
-# Build in a temporary staging directory, then atomically replace only the
-# generated app folder. Do not remove or read user's media.
-mkdir -p "$BUILD_ROOT"
-rm -rf "$STAGE"
+# Stage OUTSIDE ~/Applications, so LaunchServices never discovers two
+# bundles with the same ID. Remove the temporary files even if signing fails.
+mkdir -p "$BUILD_ROOT" "$STAGING_HOME"
+STAGE_DIR="$(mktemp -d "$STAGING_HOME/stage.XXXXXXXX")"
+trap 'rm -rf "$STAGE_DIR"' EXIT
+STAGE="$STAGE_DIR/Cineo Dev.app"
 mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
 cp "$BIN_DIR/Cineo" "$STAGE/Contents/MacOS/Cineo"
 cat > "$STAGE/Contents/Info.plist" <<'EOF'
