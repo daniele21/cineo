@@ -49,6 +49,10 @@ bash scripts/bootstrap-native.sh --build
 
 # Recheck the bundle without building
 bash scripts/bootstrap-native.sh --verify
+
+# Real-Mac debug build: uses locally installed Apple Development identity,
+# never GitHub CI credentials or a hard-coded team in source control
+CINEO_APPLE_TEAM=YOUR10CHARID bash scripts/bootstrap-native.sh --dev-build
 ```
 
 By default everything is staged in a temporary directory. Override with `CINEO_NATIVE_ROOT=/path/to/temporary-workspace` (outside the repository). The overlay **removes upstream Sparkle update feed, URL scheme/file associations and sandbox-data migration**, disables its local agent bridge and selects a neutral tray icon. The stage retains Orbit internal code/UI pending Cineo-specific UX work. The upstream MIT notice is copied into `UPSTREAM-ORBIT-LICENSE.txt`.
@@ -57,7 +61,7 @@ GitHub Actions runs [`Cineo P1 native bootstrap`](../.github/workflows/p1-native
 
 ### Interactive macOS gate (P1, not yet passed)
 
-After a successful unsigned build, the app must be signed by an authorized Apple developer identity before the **physical Mac** capture/permission smoke. Open the staged `Reco.xcodeproj` in Xcode, configure the intended development Team and a unique Cineo bundle ID (the overlay sets `com.daniele21.cineo`), then build/run in Debug with automatic signing. Keep the original source checkout pinned and overlay applied. No developer credentials belong in the repository or GitHub logs.
+After a successful unsigned build, the app must be signed by an authorized Apple developer identity before the **physical Mac** capture/permission smoke. Set `CINEO_APPLE_TEAM` to the 10-character Team ID for the Apple Development identity already installed in Xcode, then run `bash scripts/bootstrap-native.sh --dev-build`. The bootstrap uses automatic signing and checks the resulting app with `scripts/native-smoke-doctor.sh`; it does not open the app or grant TCC automatically. Alternatively open the pinned staged `Reco.xcodeproj` in Xcode and configure the team manually. Never commit identities, keys or provisioning data.
 
 On a real Mac, record the exact macOS/Xcode version and follow this checklist:
 

@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # P1 pinned native bootstrap. No imported upstream source is committed to Cineo.
-# --plan is read-only and works on Linux. --build requires macOS / Xcode.
+# --plan is read-only and works on Linux. --build needs Xcode; --dev-build
+# additionally needs a configured local Apple Development signing team.
 ROOT="${CINEO_NATIVE_ROOT:-${TMPDIR:-/tmp}/cineo-p1-native}"
 SHA="219c4c8ad9965229aa84271c5201b1b8ad26eb7a"
 URL="https://github.com/diip3sh/orbit.git"
@@ -18,10 +19,11 @@ case "$ACTION" in
     echo "Expected unsigned bundle: $APP"
     echo "Run: bash scripts/bootstrap-native.sh --build"
     echo "Requires: macOS, Xcode 26+, git, python3"
+    echo "To sign locally: CINEO_APPLE_TEAM=<your_Apple_team_id> bash scripts/bootstrap-native.sh --dev-build"
     exit 0 ;;
-  --build|--verify) ;;
+  --build|--verify|--dev-build) ;;
   *)
-    echo "Usage: bash scripts/bootstrap-native.sh --plan|--build|--verify" >&2
+    echo "Usage: bash scripts/bootstrap-native.sh --plan|--build|--verify|--dev-build" >&2
     exit 2 ;;
 esac
 
@@ -65,13 +67,33 @@ actual=$(git -C "$SRC" rev-parse HEAD)
 
 python3 "$(dirname "$0")/cineo_native_overlay.py" "$SRC"
 cp "$SRC/LICENSE" "$ROOT/UPSTREAM-ORBIT-LICENSE.txt"
-echo "Compiling unsigned Cineo from Orbit $SHA"
-(
-  set -o pipefail
-  xcodebuild -project "$SRC/Reco.xcodeproj" -scheme Reco \
-    -configuration Debug -destination 'platform=macOS' \
-    -derivedDataPath "$ROOT/DerivedData" CODE_SIGNING_ALLOWED=NO build \
-    2>&1 | tee "$ROOT/logs/cineo-bootstrap-build.log"
-)
-bash "$0" --verify
-echo "P1 Cineo bootstrap build verified: $APP"
+if [[ "$ACTION" == "--dev-build" ]]; then
+  TEAM="${CINEO_APPLE_TEAM:-}"
+  if [[ -z "$TEAM" || ! "$TEAM" =~ ^[A-Z0-9]{10}$ ]]; then
+    echo "Set CINEO_APPLE_TEAM to your own 10-character Apple Development Team ID." >&2
+    exit 9
+  fi
+  echo "Compiling locally signed Cineo development app (team ID is not logged)"
+  (
+    set -o pipefail
+    xcodebuild -project "$SRC/Reco.xcodeproj" -scheme Reco \
+      -configuration Debug -destination 'platform=macOS' \
+      -derivedDataPath "$ROOT/DerivedData" \
+      DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic CODE_SIGNING_ALLOWED=YES build \
+      2>&1 | tee "$ROOT/logs/cineo-dev-build.log"
+  )
+  bash scripts/native-smoke-doctor.sh --app "$APP"
+  echo "Signed test bundle verified; open it manually to grant macOS capture permissions: $APP"
+  echo "Follow docs/testing/native-smoke.md. Never commit signing material."
+else
+  echo "Compiling unsigned Cineo from Orbit $SHA"
+  (
+    set -o pipefail
+    xcodebuild -project "$SRC/Reco.xcodeproj" -scheme Reco \
+      -configuration Debug -destination 'platform=macOS' \
+      -derivedDataPath "$ROOT/DerivedData" CODE_SIGNING_ALLOWED=NO build \
+      2>&1 | tee "$ROOT/logs/cineo-bootstrap-build.log"
+  )
+  bash "$0" --verify
+  echo "P1 Cineo unsigned bootstrap build verified: $APP"
+fi
