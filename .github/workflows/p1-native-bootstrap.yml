@@ -5,6 +5,8 @@ on:
     paths:
       - 'scripts/bootstrap-native.sh'
       - 'scripts/cineo_native_overlay.py'
+      - 'native/OrbitIntegration/**'
+      - 'Packages/CineoDirector/**'
       - '.github/workflows/p1-native-bootstrap.yml'
       - 'docs/decisions/**'
       - 'scripts/native-smoke-doctor.sh'
@@ -13,6 +15,8 @@ on:
     paths:
       - 'scripts/bootstrap-native.sh'
       - 'scripts/cineo_native_overlay.py'
+      - 'native/OrbitIntegration/**'
+      - 'Packages/CineoDirector/**'
       - 'scripts/native-smoke-doctor.sh'
       - '.github/workflows/p1-native-bootstrap.yml'
   workflow_dispatch:
