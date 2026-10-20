@@ -126,3 +126,21 @@ The presence of a stale window invalidates runtime conclusions about fixes.
 5. If a failure persists, copy the Activity log and record macOS version, launch method and the numeric error domain/code. Leave any failed media in place for recovery/inspection.
 
 A green GitHub Actions CLT build proves compilation/signing, **not** the real ScreenCaptureKit capture-to-MP4 flow. This change remains a candidate until the physical-Mac regression passes.
+
+
+## Candidate G1 project round-trip — integration PR #56 (not yet Mac-verified)
+
+This integration branch layers the existing `CineoProject` package over the PR #55 local Studio editor. All commands below use the **same local Cineo checkout and application identity**, not a cloned worktree or detached checkout.
+
+```bash
+cd ~/Personal/cineo
+git status --short                       # preserve any local changes first
+git fetch origin
+git switch feat/cineo-mvp-integration    # existing branch; no git detach
+git pull --ff-only
+bash scripts/test-cineo.sh --interactive # CLT-only; only ~/Applications/Cineo Dev.app
+```
+
+In the app select **Apri MP4 / progetto…**, pick a verified unrotated H.264 MP4, apply one manual keyframe and change the stage background. Click **Salva progetto Cineo**. This creates a unique `~/Movies/Cineo/Projects/<uuid>.cineo` package with `Media/capture-*.mp4`, `manifest.json` and `scene.json`. The initial recording remains where it was. Exit the editor, choose **Apri MP4 / progetto…** again, and select that `.cineo` folder. Confirm the same keyframe positions, canvas, background and preview are restored. Export via **Esporta MP4**, check playback in QuickTime and ensure the source hash has not changed. **Annulla export** may be used during rendering; no original should ever be deleted.
+
+This is not a multi-clip edit model yet. Studio intentionally rejects packages with edits, speed changes, or multiple media sources rather than silently producing inaccurate video. The integration does not yet attach click telemetry to ScreenCaptureKit, does not record audio, and does not expose CLI rendering. A CI synthetic H.264 smoke is not proof of a real macOS permission/restart or actual user recording. Do not merge PR #56 until physical-Mac G0/G1 checks pass, and do not merge both competing copies of CineoScene from #50 and #55.
