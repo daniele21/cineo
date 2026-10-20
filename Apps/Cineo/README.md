@@ -5,20 +5,24 @@ This native SwiftPM macOS target builds with `bash scripts/test-cineo.sh --nativ
 ## Stable Screen Recording permissions (local development)
 
 The CLT-only build uses **persistent certificate-based signing** by default, not
-`codesign --sign -`. Run `bash scripts/test-cineo.sh --interactive` for Cineo
-or `bash scripts/test-cineo.sh --isolated-capture` for the stop-fix candidate.
-There is no Xcode.app or paid Apple Developer account requirement.
+`codesign --sign -`. Run `bash scripts/test-cineo.sh --interactive` from
+the candidate checkout. **Every worktree installs the same `~/Applications/Cineo Dev.app`**.
+The old `--isolated-capture` command is now an alias: it does not generate
+another Mac application identity. No Xcode.app or paid Developer Team is required.
 
 - **First use:** `scripts/ensure-cineo-signing.sh` creates one local code-signing
   certificate with a private key stored in the macOS **login Keychain**.
   Its public SHA-1 fingerprint is pinned at
   `~/Library/Application Support/Cineo/signing/identity.sha1`.
   Initial Keychain authorization may be required.
-- **Every later build:** the exact same pinned certificate is selected by SHA-1,
-  and the signed app uses a stable bundle identifier and a durable path:
-  `~/Library/Application Support/Cineo/Builds/Cineo.app`, or
-  `Cineo Stop Fix.app` for the isolated diagnostic variant. The build checks
-  that the designated requirement is not tied to a `cdhash`.
+- **Every later build:** the same pinned certificate is selected by SHA-1;
+  the bundle ID is always `com.daniele21.cineo.capturealpha.dev`, and the
+  install path is always `~/Applications/Cineo Dev.app`. The app's source SHA
+  is stamped into its signed Info.plist. The launcher validates SHA, signature
+  and bundle ID, registers this exact path with LaunchServices using
+  `lsregister -f`, and opens it by **absolute path**. Interactive tests refuse
+  non-canonical `CINEO_CLT_BUILD_ROOT` overrides or an already-running Cineo.
+  The designated requirement must not contain a changing `cdhash`.
 - **If the signing identity is lost/expired:** the build fails with an actionable
   error instead of silently creating a different certificate or reverting to
   ad-hoc signing. Preserve the Keychain identity when migrating Macs.
@@ -28,11 +32,24 @@ There is no Xcode.app or paid Apple Developer account requirement.
   without any shared private signing keys. Never use ad-hoc for local permission
   testing: macOS may require authorization after every binary change.
 
-Switching **once** from the previous ad-hoc app to the newly certificate-signed
-app can require approving Screen Recording again. Likewise, Cineo and
-Cineo Stop Fix deliberately have **different bundle IDs** and therefore
-separate permission grants. Rebuilds *within* each signed variant should keep
-their grants as long as the certificate and bundle ID stay unchanged.
+**Why the legacy window used to reopen after permission approval:** macOS
+uses LaunchServices for permission-related app restarts. Multiple previously
+built Cineo.app bundles with the same old bundle ID could cause it to reopen
+a *different registered copy* than the one just compiled. Apple's LaunchServices
+documentation explains its bundle-ID-based app resolution.
+
+The developer app now uses a **new, exclusive bundle ID and one path**. This
+identity migration requires **one fresh Screen Recording approval** for
+`Cineo Dev` (it does not erase the legacy app's authorization). Later builds
+with the same pinned certificate and same bundle ID should reuse that grant.
+macOS can still ask for user approval for unrelated policy reasons.
+
+After the first grant, macOS may quit/relaunch the app. Its selected window
+must show `BUNDLE=com.daniele21.cineo.capturealpha.dev`, a `SOURCE`
+hash matching the checkout, and `Running app location: .../Applications/Cineo Dev.app`.
+If it opens a legacy Cineo window, **do not record with it**; quit it and
+open `~/Applications/Cineo Dev.app` directly, then report the identity logs.
+No old app or TCC database entries are deleted by this workflow.
 
 The local certificate is **not Developer ID**: it does not notarize the app or
 provide distribution-grade Gatekeeper trust. A future release needs an Apple
@@ -63,7 +80,8 @@ these messages exist on `main` but not in this branch.
 
 The CLT build now stamps its exact 12-character source commit and capture
 implementation into the signed `Info.plist`. The app displays `SOURCE <sha>
-• PID <number>` and logs `Runtime identity: SOURCE=... PID=... BUNDLE=...`.
+• PID <number>` and logs `Runtime identity: SOURCE=... PID=... BUNDLE=...` and the exact
+`Running app location` path.
 The launcher refuses to run while *any* existing Cineo executable is active.
 It never force-quits another Cineo process, because that could interrupt a
 recording and lose media. Quit all existing Cineo windows with Command-Q
@@ -74,7 +92,7 @@ To compare the source, signed binary, and process on the physical Mac:
 ```bash
 git rev-parse --short=12 HEAD
 git grep -n 'Stop requested\.' -- Apps/Cineo/Sources/Cineo/CineoApp.swift
-APP="$HOME/Library/Application Support/Cineo/Builds/Cineo.app"
+APP="$HOME/Applications/Cineo Dev.app"
 /usr/libexec/PlistBuddy -c 'Print :CineoSourceCommit' "$APP/Contents/Info.plist"
 codesign --verify --strict "$APP"
 pgrep -alf Cineo || true
@@ -85,7 +103,7 @@ The presence of a stale window invalidates runtime conclusions about fixes.
 
 ## Real-Mac regression for the stop/finalization race
 
-1. Use the dedicated candidate checkout and launch with `bash scripts/test-cineo.sh --isolated-capture` (CLT only, no Xcode.app). This builds a separately signed **Cineo Stop Fix.app** with bundle ID `com.daniele21.cineo.capturealpha.stopfix`; it leaves existing Cineo.app and its macOS permission identity untouched. The command checks bundle ID and prints the exact source HEAD before opening a fresh instance. macOS may request Screen Recording permission again for the new identity. Verify the new app shows **Capture fix candidate • stream-stop finalization** and logs **Build variant: stream-stop finalization**. If either marker is missing, the recording does not test this fix.
+1. From the dedicated candidate checkout launch with `bash scripts/test-cineo.sh --interactive` (CLT only, no Xcode.app). It installs/opens only **Cineo Dev.app** with bundle ID `com.daniele21.cineo.capturealpha.dev` in `~/Applications`. When macOS asks you to approve Screen Recording for **Cineo Dev**, allow it once. After a permission-related restart confirm the exact `Running app location` and `SOURCE` logs. Verify the UI shows **Capture fix candidate • stream-stop finalization** and never logs `Recording output removed`.
 2. Record a harmless desktop for at least 10 seconds; press Stop exactly once.
 3. Expect `Capture stream stopped`, then `Finalization callback received`, then `Verified MP4`. Check the MP4 opens and has video, nonzero duration and nonzero size.
 4. Repeat with short (3 s) and longer (60 s) recordings, and with a second recording in the same app session. Confirm no `RPRecordingErrorDomain -5814` / `-5815` and no stuck `Finalizing MP4` phase.
