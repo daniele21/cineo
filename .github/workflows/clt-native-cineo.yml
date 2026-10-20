@@ -58,6 +58,19 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/Info.plist")" = com.daniele21.cineo.capturealpha
           codesign --verify --strict "$CINEO_CLT_BUILD_ROOT/Cineo.app"
           echo "Native Cineo app packaged under standalone CLT."
+      - name: Package distinctly identified Stop Fix candidate
+        env:
+          CINEO_CLT_BUILD_ROOT: ${{ runner.temp }}/cineo-stopfix
+          CINEO_CLT_ISOLATED_CAPTURE: '1'
+        run: |
+          set -euo pipefail
+          bash scripts/build-cineo-clt.sh
+          app="$CINEO_CLT_BUILD_ROOT/Cineo Stop Fix.app"
+          test -x "$app/Contents/MacOS/Cineo"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = com.daniele21.cineo.capturealpha.stopfix
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$app/Contents/Info.plist")" = "Cineo Stop Fix"
+          codesign --verify --strict "$app"
+          echo "PASS: isolated capture candidate signed and verified."
 
   clt-core-smoke:
     name: Core algorithm smoke without Swift Testing macros (CLT only)
