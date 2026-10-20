@@ -149,14 +149,16 @@ private struct CaptureDashboard: View {
                 }
                 Button {
                     let panel = NSOpenPanel()
-                    panel.canChooseDirectories = false
+                    // .cineo is a package directory; make it selectable as well
+                    // as MP4 files. The editor validates file and project contents.
+                    panel.canChooseDirectories = true
                     panel.allowsMultipleSelection = false
-                    panel.allowedContentTypes = [.mpeg4Movie, .movie]
+                    panel.allowedContentTypes = []
                     if panel.runModal() == .OK, let url = panel.url {
                         onEditVideo(url)
                     }
                 } label: {
-                    Label("Modifica MP4…", systemImage: "film")
+                    Label("Apri MP4 / progetto…", systemImage: "film")
                 }
             }
 
