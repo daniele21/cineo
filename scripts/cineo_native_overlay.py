@@ -36,8 +36,11 @@ def apply_overlay(root: Path) -> None:
                         "INFOPLIST_KEY_CFBundleDisplayName = Cineo;", 2)
     pbx = replace_exact(pbx, "PRODUCT_BUNDLE_IDENTIFIER = com.diip3sh.Reco;",
                         f"PRODUCT_BUNDLE_IDENTIFIER = {BUNDLE_ID};", 2)
-    pbx = replace_exact(pbx, 'PRODUCT_NAME = "$(TARGET_NAME)";',
-                        "PRODUCT_NAME = Cineo;", 2)
+    product_name = 'PRODUCT_NAME = "$(TARGET_NAME)";'
+    if pbx.count(product_name) != 4:
+        raise ValueError("Unsafe upstream drift: expected two app and two test product-name settings")
+    # Xcode app configurations occur before its tests; rename only app product.
+    pbx = pbx.replace(product_name, "PRODUCT_NAME = Cineo;", 2)
     team = "DEVELOPMENT_TEAM = 6TF45WCU3B;"
     if pbx.count(team) < 4:
         raise ValueError("Unsafe upstream drift: signing team layout changed")
