@@ -125,4 +125,87 @@ struct CineoInstructionDocumentTests {
             try compile(#"{"version":1,"timebase":"source","stage":{"background":"dark"},"actions":[]}"#)
         }
     }
+
+    @Test func manualCameraRoundTripIsExactlyEquivalent() throws {
+        let plan = CineoScenePlan(
+            outputWidth: 1080, outputHeight: 1920,
+            paddingFraction: 0.105,
+            background: .init(red: 0.015, green: 0.017, blue: 0.025),
+            camera: [
+                .init(time: 0, zoom: 1, focusX: 0.5, focusY: 0.5),
+                .init(time: 1.7, zoom: 1.73, focusX: 0.81, focusY: 0.27),
+                .init(time: 2.8, zoom: 2.7, focusX: 0.9, focusY: 0.11),
+                .init(time: 6.1, zoom: 1, focusX: 0.5, focusY: 0.5)
+            ]
+        )
+        let json = try CineoInstructionDocument.equivalentJSON(for: plan, duration: 10)
+        #expect(json.contains("camera.keyframe"))
+        let parsed = try CineoInstructionDocument.decode(Data(json.utf8))
+        #expect(parsed.actions.count == 4)
+        let restored = try parsed.compile(duration: 10, over: base)
+        #expect(restored == plan)
+        for time in stride(from: 0.0, through: 9.8, by: 0.2) {
+            let before = try plan.evaluate(time: time, sourceWidth: 1512, sourceHeight: 982)
+            let after = try restored.evaluate(time: time, sourceWidth: 1512, sourceHeight: 982)
+            #expect(before == after)
+        }
+    }
+
+    @Test func exportEmptyManualTimelineStillRoundTripsStage() throws {
+        let plan = CineoScenePlan(
+            outputWidth: 1920, outputHeight: 1080,
+            paddingFraction: 0.09,
+            background: .init(red: 0.91, green: 0.93, blue: 0.97),
+            camera: []
+        )
+        let json = try CineoInstructionDocument.equivalentJSON(for: plan, duration: 8)
+        let decoded = try CineoInstructionDocument.decode(Data(json.utf8))
+        #expect(decoded.actions.isEmpty)
+        #expect(try decoded.compile(duration: 8, over: base) == plan)
+    }
+
+    @Test func exactKeyframeImportRejectsEqualTimes() {
+        let json = """
+        {"version":1,"timebase":"output","actions":[
+          {"id":"k1","type":"camera.keyframe","time":2,
+           "target":{"x":0.5,"y":0.5},"scale":1},
+          {"id":"k2","type":"camera.keyframe","time":2,
+           "target":{"x":0.6,"y":0.4},"scale":1.6}
+        ]}
+        """
+        #expect(throws: CineoInstructionError.self) { try compile(json) }
+    }
+
+    @Test func cannotMixDescriptiveZoomsAndExactKeyframes() {
+        let json = """
+        {"version":1,"timebase":"output","actions":[
+          {"id":"shot","type":"camera.zoom","start":3,"end":6,
+           "target":{"x":0.8,"y":0.3},"scale":1.5,
+           "transition":{"in":0.4,"out":0.4}},
+          {"id":"key","type":"camera.keyframe","time":8,
+           "target":{"x":0.5,"y":0.5},"scale":1}
+        ]}
+        """
+        #expect(throws: CineoInstructionError.self) { try compile(json) }
+    }
+
+    @Test func keyframeDoesNotAcceptZoomShotFields() {
+        let json = """
+        {"version":1,"timebase":"output","actions":[
+          {"id":"key","type":"camera.keyframe","time":2, "end":3,
+           "target":{"x":0.5,"y":0.5},"scale":1}
+        ]}
+        """
+        #expect(throws: CineoInstructionError.self) { try compile(json) }
+    }
+
+    @Test func equivalenceFailsForUnrepresentableStage() {
+        let unsupported = CineoScenePlan(
+            outputWidth: 1440, outputHeight: 900,
+            background: .init(red: 0.3, green: 0.4, blue: 0.5)
+        )
+        #expect(throws: CineoInstructionError.self) {
+            try CineoInstructionDocument.equivalentJSON(for: unsupported, duration: 5)
+        }
+    }
 }
