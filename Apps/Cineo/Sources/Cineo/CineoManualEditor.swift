@@ -212,8 +212,12 @@ final class CineoEditorModel: ObservableObject {
                 else { style = "Dark" }
                 return
             }
-            importedActionMarkers = document.actions.map {
-                ImportedActionMarker(id: $0.id, at: $0.start + $0.transition.in)
+            importedActionMarkers = document.actions.compactMap { action in
+                guard let moment = action.time ??
+                    action.start.map({ $0 + (action.transition?.in ?? 0) }) else {
+                    return nil
+                }
+                return ImportedActionMarker(id: action.id, at: moment)
             }
             let focusMoment = importedActionMarkers.first?.at ?? selectedTime
             scrub(focusMoment)
@@ -500,6 +504,7 @@ final class CineoEditorModel: ObservableObject {
 struct CineoManualEditorView: View {
     @ObservedObject var editor: CineoEditorModel
     let onClose: () -> Void
+    @State private var showingInstructions = false
 
     private func control(_ getter: @escaping () -> Double,
                          _ setter: @escaping (Double) -> Void) -> Binding<Double> {
@@ -545,7 +550,14 @@ struct CineoManualEditorView: View {
                     }
                 }
                 .disabled(editor.isExporting || editor.isSavingProject || editor.sourceURL == nil)
-                .help("Importa azioni camera.zoom e stile da un file JSON versionato.")
+                .help("Importa azioni camera.zoom, camera.keyframe e stile da JSON.")
+                Button {
+                    showingInstructions = true
+                } label: {
+                    Label("Mostra istruzioni", systemImage: "curlybraces")
+                }
+                .disabled(editor.sourceURL == nil)
+                .help("Vedi le istruzioni JSON equivalenti al montaggio, la guida e gli esempi.")
                 if editor.isSavingProject { ProgressView().controlSize(.small) }
             }
             HStack(alignment: .top, spacing: 18) {
@@ -704,5 +716,230 @@ struct CineoManualEditorView: View {
         }
         .padding(20)
         .frame(minWidth: 1040, minHeight: 580)
+        .sheet(isPresented: $showingInstructions) {
+            CineoInstructionsDialog(editor: editor)
+        }
+    }
+}
+
+
+/// Read-only representation of the actual scene, not a speculative semantic
+/// reconstruction. "Current" is regenerated from the scene each time the
+/// observed editor changes; it is also importable through the existing UI.
+private struct CineoInstructionsDialog: View {
+    @ObservedObject var editor: CineoEditorModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var tab: Tab = .current
+    @State private var feedback = ""
+
+    private enum Tab: String, CaseIterable {
+        case current = "Montaggio attuale"
+        case guide = "Guida"
+        case examples = "Esempi"
+    }
+
+    private var currentJSON: String? {
+        try? CineoInstructionDocument.equivalentJSON(
+            for: editor.currentPlan, duration: editor.duration
+        )
+    }
+
+    private var generationError: String {
+        do {
+            _ = try CineoInstructionDocument.equivalentJSON(
+                for: editor.currentPlan, duration: editor.duration
+            )
+            return ""
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private let exampleZoom = #"""
+    {
+      "version": 1,
+      "timebase": "output",
+      "stage": {
+        "aspect": "16:9",
+        "background": "dark",
+        "padding": 0.07
+      },
+      "actions": [
+        {
+          "id": "zoom-dashboard",
+          "type": "camera.zoom",
+          "start": 2.0,
+          "end": 5.2,
+          "target": {"x": 0.72, "y": 0.33},
+          "scale": 1.7,
+          "transition": {"in": 0.35, "out": 0.4}
+        }
+      ]
+    }
+    """#
+
+    private let exampleKeyframe = #"""
+    {
+      "version": 1,
+      "timebase": "output",
+      "stage": {"aspect": "9:16", "background": "black", "padding": 0.06},
+      "actions": [
+        {"id": "overview", "type": "camera.keyframe", "time": 0,
+         "target": {"x": 0.5, "y": 0.5}, "scale": 1},
+        {"id": "focus", "type": "camera.keyframe", "time": 3,
+         "target": {"x": 0.8, "y": 0.3}, "scale": 1.8},
+        {"id": "restore", "type": "camera.keyframe", "time": 5,
+         "target": {"x": 0.5, "y": 0.5}, "scale": 1}
+      ]
+    }
+    """#
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Istruzioni Cineo")
+                        .font(.title2.bold())
+                    Text("Lo stesso montaggio, in formato JSON documentato.")
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                }
+                Spacer()
+                Button("Chiudi") { dismiss() }
+            }
+            Picker("Sezione", selection: $tab) {
+                ForEach(Tab.allCases, id: \.self) { option in
+                    Text(option.rawValue).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Group {
+                switch tab {
+                case .current: currentContent
+                case .guide: guideContent
+                case .examples: examplesContent
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            Divider()
+            HStack {
+                Text(feedback.isEmpty
+                     ? "L'originale rimane intatto: il JSON descrive solo il montaggio."
+                     : feedback)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                Spacer()
+                if tab == .current, let json = currentJSON {
+                    Button("Copia JSON") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(json, forType: .string)
+                        feedback = "JSON del montaggio copiato."
+                    }
+                    Button("Salva JSON…") {
+                        let panel = NSSavePanel()
+                        panel.allowedContentTypes = [.json]
+                        panel.nameFieldStringValue = "cineo-actions-current.json"
+                        if panel.runModal() == .OK, let destination = panel.url {
+                            do {
+                                try Data(json.utf8).write(to: destination, options: .atomic)
+                                feedback = "Istruzioni salvate: \(destination.lastPathComponent)"
+                            } catch {
+                                feedback = "Salvataggio fallito: \(error.localizedDescription)"
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                if tab == .examples {
+                    Button("Copia esempio zoom") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(exampleZoom, forType: .string)
+                        feedback = "Esempio copiato. Salvalo come .json e importalo in Studio."
+                    }
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 790, height: 630)
+    }
+
+    private var currentContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Queste sono le istruzioni equivalenti agli effetti presenti adesso nella timeline.")
+                .font(.callout)
+            Text("Per garantire un risultato identico, Cineo usa camera.keyframe. Puoi modificare il montaggio nella UI e riaprire questa finestra per ottenere il JSON aggiornato.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let json = currentJSON {
+                codeArea(json)
+            } else {
+                ContentUnavailableView(
+                    "Istruzioni non disponibili",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(generationError)
+                )
+            }
+        }
+    }
+
+    private var guideContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Come leggere e scrivere le istruzioni")
+                    .font(.headline)
+                Text("Ogni documento contiene version, timebase, stage e actions. Puoi creare il file con un editor di testo oppure generarlo da un agente AI, poi importarlo con «Importa istruzioni…».")
+                Text("**version:** 1 · **timebase:** \"output\" significa secondi sulla timeline del video.")
+                Text("**stage.aspect:** \"16:9\" oppure \"9:16\". **stage.background:** \"dark\", \"black\", \"light\". **stage.padding:** fra 0 e 0.35 (escluso).")
+                Text("**camera.zoom:** uno zoom completo con start, end (secondi), target x/y (coordinate da 0 a 1), scale (da 1.01 a 2.5) e transition.in/out (durata di ingresso e uscita, almeno 0.05 s). Cineo crea entrata, mantenimento e uscita.")
+                Text("**camera.keyframe:** una singola inquadratura a time (secondi), target x/y (0–1) e scale (1–3). È la rappresentazione fedele delle modifiche fatte manualmente e del loro easing.")
+                Text("**actions[].id:** identificativo univoco con lettere, numeri, - e _. Non puoi mescolare camera.zoom e camera.keyframe nello stesso file v1.")
+                Text("Importare un file sostituisce gli zoom attuali **solo dopo tua conferma**; le impostazioni stage non specificate rimangono invariate. Effetti non implementati come cursor.highlight, text.callout e tagli vengono rifiutati.")
+                Text("La preview attuale mostra i fotogrammi renderizzati mentre sposti la timeline; Play/Pausa animato è ancora da implementare.")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.callout)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var examplesContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Esempio 1 — Zoom in, pausa, zoom out")
+                    .font(.headline)
+                Text("Un focus sul dashboard da 2.0 a 5.2 secondi. Richiede un video di almeno 5.2 secondi.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                exampleCode(exampleZoom)
+                Divider()
+                Text("Esempio 2 — Montaggio manuale con keyframe esatti")
+                    .font(.headline)
+                Text("Panoramica all'inizio, zoom a 3 s e ritorno a 5 s. Le transizioni usano lo stesso easing dell'editor.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                exampleCode(exampleKeyframe)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func exampleCode(_ value: String) -> some View {
+        Text(value)
+            .font(.system(size: 11, design: .monospaced))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func codeArea(_ value: String) -> some View {
+        ScrollView([.vertical, .horizontal]) {
+            exampleCode(value)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
