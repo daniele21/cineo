@@ -19,6 +19,17 @@
 
 The old P0 engineering-template migration work remains open as P1 repository cleanup. [Issue #3](https://github.com/daniele21/cineo/issues/3) tracks the next real native capture-to-file milestone. This note does not claim Cineo is distributable.
 
+## Parallel post-production execution plan — 2026-10-20
+
+The immediate goal after the first verified 25 s H.264 capture is **Auto / Assisted / Studio / headless CLI using one canonical project and renderer**. The current CLT-native recorder still has no connected editor/export compositor; existing pure-Swift modules are **not yet integrated** into its application target.
+
+- [Detailed parallel plan](plans/auto-edit-parallel-delivery.md)
+- [GitHub execution tracker #47](https://github.com/daniele21/cineo/issues/47) and [draft planning PR #45](https://github.com/daniele21/cineo/pull/45)
+- **Serial G0:** finish [capture regression/signing PR #44](https://github.com/daniele21/cineo/pull/44), validate 3/10/60 s and sequential captures, freeze project/scene/event/job interface contracts.
+- **Wave 1 parallel:** project bridge [#5](https://github.com/daniele21/cineo/issues/5), scene + renderer [#6](https://github.com/daniele21/cineo/issues/6)/[#9](https://github.com/daniele21/cineo/issues/9), telemetry [#4](https://github.com/daniele21/cineo/issues/4), UI [#8](https://github.com/daniele21/cineo/issues/8), CLI [#46](https://github.com/daniele21/cineo/issues/46), quality [#10](https://github.com/daniele21/cineo/issues/10).
+- **Serial G1→G4:** real styled MP4 → optional click-based decisions/overrides → GUI/CLI output parity → publishable demo gate.
+- **Scope adjustment:** move a small local/headless CLI into MVP for reproducible automation. [#12](https://github.com/daniele21/cineo/issues/12) retains optional semantic Director / advanced automation as P5. The CLI is **not** a second renderer and does not require a model.
+
 ## Critical path
 
 | Milestone | Outcome | Main deliverable | Depends on | Exit gate |
