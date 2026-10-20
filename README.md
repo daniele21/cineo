@@ -6,9 +6,9 @@ Cineo is a **planned native, local-first macOS application** for creating cinema
 
 The goal: record a workflow, get a polished first edit with purposeful zooms and cursor motion, refine the details only when necessary, then export a clear product video for a website, launch post, presentation or tutorial.
 
-> **Project status — Product definition / technical discovery (October 2026).**
+> **Project status — P1 experimental native bootstrap (October 2026).**
 >
-> The documentation describes the **intended product**, not a released application. This repository currently contains engineering-template materials; it has **not yet adopted or validated a native Cineo codebase**, and the native upstream decision is still pending the P0 benchmark.
+> The documentation describes the **intended product**, not a released application. P0 selected Orbit **conditionally**, after a 3/3 successful Xcode compile matrix, and P1 now produces an **unsigned Cineo-named staging app** from a pinned upstream checkout. Real signed Mac launch, TCC capture/audio and edit/export video validation remain mandatory and unverified. Some engineering-template materials still need migration.
 
 ## The experience we want
 
@@ -44,18 +44,18 @@ Cineo should focus on **the feature's result**, not blindly zooming on every cli
 
 ## Engineering strategy
 
-**Orbit** ([diip3sh/orbit](https://github.com/diip3sh/orbit)) is the leading candidate for the native application foundation. [BetterCapture](https://github.com/jsattler/BetterCapture) is the robust capture baseline, [CineScreen](https://github.com/jasonzh0/CineScreen) is a compositor/export comparison, and [OpenScreen](https://github.com/getopenscreen/openscreen) informs editor UX and programmable editing. None is yet integrated into Cineo, and repo READMEs are not treated as proof of build/feature maturity.
+**Orbit** ([diip3sh/orbit](https://github.com/diip3sh/orbit)) is the **conditionally selected P1 foundation** with a reversible pinned staging build. [BetterCapture](https://github.com/jsattler/BetterCapture) is the robust capture baseline, [CineScreen](https://github.com/jasonzh0/CineScreen) is a compositor/export comparison, and [OpenScreen](https://github.com/getopenscreen/openscreen) informs editor UX and programmable editing. Orbit is materialized externally by a repeatable script rather than committed wholesale; other projects remain references and alternatives. Repo READMEs are not treated as proof of running features.
 
-The decision to fork Orbit versus assemble a smaller native foundation will be made only after **P0 source audit, licensing verification and reproducible Mac builds and exported demo tests**.
+[ADR-0001](docs/decisions/0001-native-foundation.md) authorizes only the **P1 Orbit staging experiment** based on verified source inspection and Xcode compilation. The final adoption/distribution decision remains blocked by signed real-Mac capture/export tests and asset-license review.
 
 We intentionally will **not** introduce multiple parallel compositor/timeline implementations or mandatory AI into the MVP.
 
-## Next step: P0
+## Next step: P1 native app smoke
 
-1. Audit the inherited starter and adapt its engineering configuration for a Swift native product.
-2. Pin and inspect Orbit / CineScreen / BetterCapture source, licenses and dependencies.
-3. Build the candidates with Xcode and run comparable real capture/edit/export workflows.
-4. Publish a decision record, build/test evidence and the chosen first vertical slice.
+1. Run `bash scripts/bootstrap-native.sh --plan` to inspect the pinned native stage.
+2. On a compatible Mac with Xcode 26+, run `bash scripts/bootstrap-native.sh --build` to generate and verify the **unsigned** prototype.
+3. Sign/launch the staged native app with an authorized Apple development identity and execute the real TCC/capture/audio/export checklist in [development guide](docs/development.md).
+4. Continue native Cineo UX and safe fork reduction only after that evidence; never treat green compile as proof of real recording.
 
 See [the roadmap](docs/roadmap.md) for task IDs, delivery phases, acceptance criteria and stop conditions.
 
