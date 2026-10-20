@@ -42,6 +42,14 @@ jobs:
       - name: Generate and re-render synthetic H264 with shared preview/export compositor
         run: |
           swift run --package-path Packages/CineoScene --configuration release cineo-scene-smoke
+      - name: Reject SwiftUI @State macros unavailable in Apple CLT
+        run: |
+          # Apple CLT Swift 6.3 ships SwiftUI but not the host SwiftUIMacros
+          # plugin required by @State. @StateObject/ObservableObject work.
+          if grep -En '@State[[:space:]]' Apps/Cineo/Sources/Cineo/*.swift; then
+            echo 'ERROR: SwiftUI @State macro requires unavailable CLT SwiftUIMacros. Use @StateObject with an ObservableObject.' >&2
+            exit 1
+          fi
       - name: Build integrated SwiftUI Cineo Dev app without Xcode
         run: |
           swift build --package-path Apps/Cineo --configuration release
