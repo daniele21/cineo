@@ -79,7 +79,7 @@ public struct CineoPointerSidecar: Codable, Sendable, Equatable {
     public init(events: [CineoPointerEvent]) throws {
         guard events.count <= 10_000_000,
               events.allSatisfy(\.isValid),
-              zip(events, events.dropFirst()).allSatisfy({ $0.sourceSeconds <= $1.sourceSeconds })
+              zip(events, events.dropFirst()).allSatisfy({ pair in pair.0.sourceSeconds <= pair.1.sourceSeconds })
         else { throw CineoEventsError.invalidEvent }
         self.schemaVersion = Self.version
         self.events = events
