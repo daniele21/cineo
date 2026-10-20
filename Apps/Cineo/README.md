@@ -144,3 +144,16 @@ bash scripts/test-cineo.sh --interactive # CLT-only; only ~/Applications/Cineo D
 In the app select **Apri MP4 / progetto…**, pick a verified unrotated H.264 MP4, apply one manual keyframe and change the stage background. Click **Salva progetto Cineo**. This creates a unique `~/Movies/Cineo/Projects/<uuid>.cineo` package with `Media/capture-*.mp4`, `manifest.json` and `scene.json`. The initial recording remains where it was. Exit the editor, choose **Apri MP4 / progetto…** again, and select that `.cineo` folder. Confirm the same keyframe positions, canvas, background and preview are restored. Export via **Esporta MP4**, check playback in QuickTime and ensure the source hash has not changed. **Annulla export** may be used during rendering; no original should ever be deleted.
 
 This is not a multi-clip edit model yet. Studio intentionally rejects packages with edits, speed changes, or multiple media sources rather than silently producing inaccurate video. The integration does not yet attach click telemetry to ScreenCaptureKit, does not record audio, and does not expose CLI rendering. A CI synthetic H.264 smoke is not proof of a real macOS permission/restart or actual user recording. Do not merge PR #56 until physical-Mac G0/G1 checks pass, and do not merge both competing copies of CineoScene from #50 and #55.
+
+## Import documented actions JSON (integration PR #56)
+
+You can use Cineo Studio **manually as before** or supply a local, versioned **Cineo Actions JSON v1** file. See [format specification](../../docs/automation/cineo-actions-v1.md) and [sample](../../docs/examples/cineo-actions-v1.json).
+
+1. Open a video **at least 13 seconds** long, or a supported `.cineo` project.
+2. Click **Importa istruzioni…** in Cineo Studio. Select the example JSON or your custom plan.
+3. When manual keyframes already exist, explicitly **Importa e sostituisci**, or cancel with no changes.
+4. Cineo compiles `camera.zoom` actions to actual editable camera keyframes (overview → zoom-in → hold → zoom-out), updates the stage, moves to the first focus, and refreshes the real composed preview frame. Click the named action markers to inspect other segments.
+5. Adjust keyframes, focus and stage as usual. The canonical scene is saved to `scene.json` for a Cineo project or the existing sidecar for an MP4; the original source remains untouched. Export with the regular CineoScene MP4 renderer.
+
+The imported JSON is **not executed as code**, and unknown effects such as captions or cursor highlights are rejected instead of silently ignored. It is an import format rather than yet a two-way JSON editor; manual changes update the scene recipe. **The preview is still frame-at-a-time** until real-time Play/Pause is implemented. No validated Mac physical UI/video evidence is claimed solely from this branch.
+
