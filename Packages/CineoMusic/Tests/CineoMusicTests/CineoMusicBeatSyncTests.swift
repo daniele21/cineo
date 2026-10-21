@@ -70,9 +70,9 @@ final class CineoMusicBeatSyncTests: XCTestCase {
     }
 
     func testBeatSyncIncludesLoopOffsetAndClipSourceIn() {
-        let keys = [CineoBeatKeyframe(time: 11.06, zoom: 1.5)]
+        let keys = [CineoBeatKeyframe(time: 10.56, zoom: 1.5)]
         let clip = CineoMusicClip(sourceIn: 1, duration: 16, loop: true)
-        let candidate = CineoBeatSync.propose(keyframes: keys, playhead: 11.06,
+        let candidate = CineoBeatSync.propose(keyframes: keys, playhead: 10.56,
                                               onsetSeconds: [1.5],
                                               clip: clip, sourceDuration: 5,
                                               videoDuration: 25, offset: 2)
