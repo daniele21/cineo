@@ -95,7 +95,7 @@ public enum CineoBeatAnalyzer {
             }
         }
 
-        let onsets = candidates.map(\.0)
+        let onsets = candidates.map { $0.0 }
         // Only infer BPM if multiple recurring intervals agree; otherwise nil.
         let intervals = zip(onsets, onsets.dropFirst()).map { $0.1 - $0.0 }
             .filter { $0 >= 0.25 && $0 <= 1.5 }.sorted()
