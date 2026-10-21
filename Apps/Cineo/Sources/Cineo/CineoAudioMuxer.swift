@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import CineoMusic
 
 /// Adds imported/generated music and any original narration to an already
 /// rendered Cineo video. Never changes the original recording or rendered input.
@@ -27,7 +28,7 @@ enum CineoAudioMuxer {
         if let narration = try await narrationAsset.loadTracks(withMediaType: .audio).first,
            let audioTrack = composition.addMutableTrack(withMediaType: .audio,
                                                    preferredTrackID: kCMPersistentTrackID_Invalid) {
-            let narrationDuration = try await narration.load(.timeRange).duration
+            let narrationDuration = (try await narration.load(.timeRange)).duration
             let length = CMTimeCompare(narrationDuration, duration) < 0 ? narrationDuration : duration
             if length.isNumeric && length.seconds > 0 {
                 try audioTrack.insertTimeRange(CMTimeRange(start: .zero, duration: length),
