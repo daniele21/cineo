@@ -8,12 +8,63 @@ public struct CineoInstructionDocument: Codable, Sendable {
     public let timebase: String
     public let stage: Stage?
     public let actions: [Action]
+    /// Optional, manually authored music settings in the same instruction document.
+    public let music: Music?
 
-    public init(version: Int = 1, timebase: String = "output", stage: Stage?, actions: [Action]) {
+    public init(version: Int = 1, timebase: String = "output", stage: Stage?, actions: [Action], music: Music? = nil) {
         self.version = version
         self.timebase = timebase
         self.stage = stage
         self.actions = actions
+        self.music = music
+    }
+
+    /// A music.generate instruction. Importing it sets up generation settings;
+    /// only the explicit Generate button starts the expensive ACE-Step job.
+    public struct Music: Codable, Sendable {
+        public let type: String
+        public let caption: String
+        public let bpm: Int
+        public let duration: Double
+        public let keyscale: String
+        public let seed: Int64
+        public let volume: Double
+        public let offset: Double
+        public let fadeIn: Double
+        public let fadeOut: Double
+
+        public init(type: String = "music.generate", caption: String, bpm: Int,
+                    duration: Double, keyscale: String, seed: Int64 = -1,
+                    volume: Double = 0.4, offset: Double = 0,
+                    fadeIn: Double = 0.6, fadeOut: Double = 1.5) {
+            self.type = type
+            self.caption = caption
+            self.bpm = bpm
+            self.duration = duration
+            self.keyscale = keyscale
+            self.seed = seed
+            self.volume = volume
+            self.offset = offset
+            self.fadeIn = fadeIn
+            self.fadeOut = fadeOut
+        }
+
+        public func validate(videoDuration: Double) throws {
+            guard type == "music.generate" else {
+                throw CineoInstructionError.invalid("music.type: usare music.generate.")
+            }
+            guard !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  caption.utf8.count <= 4000,
+                  (40...240).contains(bpm),
+                  duration.isFinite, (10...600).contains(duration),
+                  !keyscale.isEmpty, keyscale.utf8.count <= 60,
+                  volume.isFinite, (0...1).contains(volume),
+                  offset.isFinite, offset >= 0, offset < videoDuration,
+                  fadeIn.isFinite, (0...duration).contains(fadeIn),
+                  fadeOut.isFinite, (0...duration).contains(fadeOut) else {
+                throw CineoInstructionError.invalid("music: valori mancanti o fuori intervallo.")
+            }
+        }
     }
 
     public struct Stage: Codable, Sendable {
@@ -90,7 +141,14 @@ public struct CineoInstructionDocument: Codable, Sendable {
         guard let root = any as? [String: Any] else {
             throw CineoInstructionError.invalid("La radice del documento deve essere un oggetto JSON.")
         }
-        try fields(root, allowed: ["version", "timebase", "stage", "actions"], at: "root")
+        try fields(root, allowed: ["version", "timebase", "stage", "actions", "music"], at: "root")
+        if let raw = root["music"] {
+            guard let music = raw as? [String: Any] else {
+                throw CineoInstructionError.invalid("music deve essere un oggetto.")
+            }
+            try fields(music, allowed: ["type", "caption", "bpm", "duration", "keyscale",
+                                       "seed", "volume", "offset", "fadeIn", "fadeOut"], at: "music")
+        }
         if let raw = root["stage"] {
             guard let stage = raw as? [String: Any] else {
                 throw CineoInstructionError.invalid("stage deve essere un oggetto.")
@@ -137,9 +195,12 @@ public struct CineoInstructionDocument: Codable, Sendable {
         guard duration.isFinite, duration > 0 else {
             throw CineoInstructionError.invalid("La durata della sorgente non è valida.")
         }
-        guard !actions.isEmpty || stage != nil else {
+        try music?.validate(videoDuration: duration)
+        guard !actions.isEmpty || stage != nil || music != nil else {
             throw CineoInstructionError.invalid("Documento senza azioni né composizione.")
         }
+        // A music-only import must never clear existing camera edits.
+        if actions.isEmpty && stage == nil && music != nil { return existing }
         var plan = existing
         if let stage {
             if let aspect = stage.aspect {
