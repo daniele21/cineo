@@ -1033,6 +1033,7 @@ struct CineoManualEditorView: View {
                         .help("Fotogramma successivo")
                         .disabled(editor.sourceURL == nil)
                     }
+                    CineoMusicTimelineStrip(editor: editor)
                     if editor.isPreviewPlaying {
                         Text("Anteprima: \(editor.previewActualFPS) fps visualizzati · qualità proxy")
                             .font(.caption.monospacedDigit())
