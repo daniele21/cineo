@@ -1,0 +1,8 @@
+# Native SwiftPM builds and local development outputs
+.DS_Store
+**/.build/
+**/DerivedData/
+
+# ACE-Step backend is an external local dependency, not Cineo source.
+# Some users keep it under ~/Personal/cineo/acestep.cpp to test locally.
+acestep.cpp/

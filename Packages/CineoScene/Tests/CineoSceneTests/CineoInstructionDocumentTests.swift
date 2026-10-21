@@ -208,4 +208,42 @@ struct CineoInstructionDocumentTests {
             try CineoInstructionDocument.equivalentJSON(for: unsupported, duration: 5)
         }
     }
+    @Test func musicOnlyInstructionsPreserveCameraAndCompileWithSameTimeline() throws {
+        let old = CineoScenePlan(outputWidth: 1920, outputHeight: 1080,
+            camera: [.init(time: 2, zoom: 1.7, focusX: 0.7, focusY: 0.3)])
+        let json = """
+        {"version":1,"timebase":"output","actions":[],
+         "music":{"type":"music.generate",
+                  "caption":"Gentle analog synth instrumental","bpm":108,
+                  "duration":30,"keyscale":"A minor","seed":8,
+                  "volume":0.35,"offset":0,"fadeIn":0.5,"fadeOut":1.5}}
+        """
+        let document = try CineoInstructionDocument.decode(Data(json.utf8))
+        #expect(document.music?.bpm == 108)
+        let output = try document.compile(duration: 34, over: old)
+        #expect(output == old)
+    }
+
+    @Test func musicRejectsUnknownFieldsAndInvalidBPM() {
+        let extra = """
+        {"version":1,"timebase":"output","actions":[],
+         "music":{"type":"music.generate","caption":"abc","bpm":110,
+                  "duration":20,"keyscale":"C major","seed":-1,
+                  "volume":0.3,"offset":0,"fadeIn":1,"fadeOut":1,
+                  "llmPrompt":"unexpected"}}
+        """
+        #expect(throws: CineoInstructionError.self) {
+            try compile(extra, duration: 30)
+        }
+        let invalid = """
+        {"version":1,"timebase":"output","actions":[],
+         "music":{"type":"music.generate","caption":"abc","bpm":900,
+                  "duration":20,"keyscale":"C major","seed":-1,
+                  "volume":0.3,"offset":0,"fadeIn":1,"fadeOut":1}}
+        """
+        #expect(throws: CineoInstructionError.self) {
+            try compile(invalid, duration: 30)
+        }
+    }
+
 }

@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 import CoreImage
 import CineoScene
 import CineoProject
+import CineoMusic
 import CryptoKit
 
 @MainActor
@@ -44,6 +45,13 @@ final class CineoEditorModel: ObservableObject {
     @Published var keyframes: [CineoCameraKeyframe] = []
     @Published private(set) var importedActionMarkers: [ImportedActionMarker] = []
     @Published var showingInstructions = false
+    @Published var showingMusic = false
+    @Published var musicSettings = CineoMusicSettings()
+    @Published var musicAsset: CineoMusicAsset?
+    @Published var musicDisplayName = ""
+    @Published var musicActualDuration = 0.0
+    @Published var musicStatus = "Imposta la musica e avvia ACE-Step locale, oppure importa un audio."
+    @Published var isGeneratingMusic = false
 
     struct ImportedActionMarker: Identifiable {
         let id: String
@@ -59,6 +67,227 @@ final class CineoEditorModel: ObservableObject {
     private var displayedFrameCount = 0
     private var displayedFrameWindowStart = ProcessInfo.processInfo.systemUptime
     private var exportTask: Task<Void, Never>?
+    private var musicTask: Task<Void, Never>?
+    private var musicPlayer: AVPlayer?
+
+    private struct StoredMusic: Codable {
+        let settings: CineoMusicSettings
+        let asset: CineoMusicAsset?
+        let displayName: String?
+    }
+
+    private var musicDirectory: URL {
+        if let projectURL { return projectURL.appendingPathComponent("Media", isDirectory: true) }
+        return FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Cineo/Music", isDirectory: true)
+    }
+
+    private var musicStateURL: URL? {
+        if let projectURL { return projectURL.appendingPathComponent("music.json") }
+        return planURL?.deletingPathExtension().appendingPathExtension("music.json")
+    }
+
+    var musicURL: URL? {
+        guard let asset = musicAsset, (try? asset.validate()) != nil else { return nil }
+        let url = musicDirectory.appendingPathComponent(asset.fileName)
+        guard url.standardizedFileURL.deletingLastPathComponent() == musicDirectory.standardizedFileURL,
+              FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
+    func saveMusicSettings() {
+        guard let file = musicStateURL else { return }
+        do {
+            try musicSettings.validate(videoDuration: duration)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let stored = StoredMusic(settings: musicSettings, asset: musicAsset, displayName: musicDisplayName)
+            try JSONEncoder().encode(stored).write(to: file, options: .atomic)
+            refreshMusicPreviewPosition()
+        } catch {
+            musicStatus = "Impostazioni non salvate: \(error.localizedDescription)"
+        }
+    }
+
+    private func restoreMusicSettings() {
+        musicPlayer?.pause()
+        musicPlayer = nil
+        musicAsset = nil
+        musicDisplayName = ""
+        musicActualDuration = 0
+        musicSettings = CineoMusicSettings(duration: max(10, min(600, duration)))
+        guard let file = musicStateURL,
+              let data = try? Data(contentsOf: file),
+              let stored = try? JSONDecoder().decode(StoredMusic.self, from: data),
+              (try? stored.settings.validate(videoDuration: duration)) != nil else { return }
+        musicSettings = stored.settings
+        if let asset = stored.asset, (try? asset.validate()) != nil {
+            musicAsset = asset
+            musicDisplayName = stored.displayName ?? asset.fileName
+            prepareMusicPlayer()
+        }
+    }
+
+    private func prepareMusicPlayer() {
+        musicPlayer?.pause()
+        musicPlayer = musicURL.map { AVPlayer(url: $0) }
+        musicPlayer?.volume = Float(musicSettings.volume)
+        musicActualDuration = 0
+        if let url = musicURL {
+            Task { [weak self] in
+                let asset = AVURLAsset(url: url)
+                if let length = try? await asset.load(.duration), length.isNumeric,
+                   self?.musicURL == url {
+                    self?.musicActualDuration = max(0, length.seconds)
+                }
+            }
+        }
+        refreshMusicPreviewPosition()
+        musicStatus = musicPlayer == nil ? "Traccia musicale non disponibile." : "Traccia pronta: regola posizione, volume e fade."
+    }
+
+    /// Updates transport after any UI edit. Scrubbing moves the audio playhead
+    /// without starting playback, so the next Play begins at the correct point.
+    private func refreshMusicPreviewPosition() {
+        guard let player = musicPlayer else { return }
+        let sourceTime = selectedTime - musicSettings.offset
+        let playable = min(musicSettings.duration,
+                           musicActualDuration > 0 ? musicActualDuration : musicSettings.duration,
+                           max(0, duration - musicSettings.offset))
+        if sourceTime < 0 || sourceTime >= playable {
+            player.pause()
+            player.volume = 0
+            if sourceTime < 0 {
+                player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+            }
+            return
+        }
+        player.seek(to: CMTime(seconds: sourceTime, preferredTimescale: 600),
+                    toleranceBefore: .zero, toleranceAfter: .zero)
+        let rampIn = musicSettings.fadeIn > 0 ? min(1, sourceTime / musicSettings.fadeIn) : 1
+        let rampOut = musicSettings.fadeOut > 0 ? min(1, (playable - sourceTime) / musicSettings.fadeOut) : 1
+        player.volume = Float(musicSettings.volume * max(0, min(rampIn, rampOut)))
+        if isPreviewPlaying && player.rate == 0 { player.play() }
+        if !isPreviewPlaying { player.pause() }
+    }
+
+    func setMusicOffset(_ newValue: Double) {
+        guard musicAsset != nil, duration > 0, !isExporting else { return }
+        musicSettings.offset = min(max(0, newValue), max(0, duration - 0.01))
+        saveMusicSettings()
+    }
+
+    func setMusicStartAtPlayhead() {
+        setMusicOffset(selectedTime)
+    }
+
+    /// Detaches the track without deleting the imported original or any WAV.
+    /// This supports undo-by-reimport and keeps project files non-destructive.
+    func removeMusic() {
+        guard !isExporting, !isGeneratingMusic else { return }
+        musicPlayer?.pause()
+        musicPlayer = nil
+        musicAsset = nil
+        musicDisplayName = ""
+        musicActualDuration = 0
+        saveMusicSettings()
+        musicStatus = "Traccia rimossa dal montaggio. Nessun file audio è stato cancellato."
+    }
+
+    func showMusicInFinder() {
+        if let url = musicURL { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+    }
+
+    func generateMusic() {
+        guard sourceURL != nil, !isGeneratingMusic, !isExporting else { return }
+        let settings = musicSettings
+        do { try settings.validate(videoDuration: duration) }
+        catch { musicStatus = error.localizedDescription; return }
+        let destination = musicDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+        isGeneratingMusic = true
+        musicStatus = "Preparazione ACE-Step…"
+        musicTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let client = try CineoACEClient()
+                try await client.generate(settings: settings, destination: destination) { message in
+                    Task { @MainActor [weak self] in self?.musicStatus = message }
+                }
+                try Task.checkCancellation()
+                self.musicAsset = CineoMusicAsset(fileName: destination.lastPathComponent, settings: settings)
+                self.musicDisplayName = "ACE-Step · \(settings.bpm) BPM · \(Int(settings.duration)) s"
+                self.prepareMusicPlayer()
+                self.saveMusicSettings()
+                self.musicStatus = "Traccia generata e salvata. Premi Play per ascoltarla con il video."
+            } catch is CancellationError {
+                try? FileManager.default.removeItem(at: destination)
+                self.musicStatus = "Generazione musicale annullata."
+            } catch {
+                self.musicStatus = "ACE-Step: \(error.localizedDescription)"
+            }
+            self.isGeneratingMusic = false
+            self.musicTask = nil
+        }
+    }
+
+    func cancelMusicGeneration() { musicTask?.cancel() }
+
+    func importMusicDialog() {
+        guard !isExporting, !isGeneratingMusic else { return }
+        let picker = NSOpenPanel()
+        picker.allowedContentTypes = [.audio]
+        picker.allowsMultipleSelection = false
+        picker.canChooseDirectories = false
+        if picker.runModal() == .OK, let url = picker.url {
+            Task { await importMusic(from: url) }
+        }
+    }
+
+    private func importMusic(from source: URL) async {
+        guard source.isFileURL, !isExporting, !isGeneratingMusic else { return }
+        do {
+            let fileExt = source.pathExtension.lowercased()
+            guard ["mp3", "wav", "m4a", "aiff", "aac"].contains(fileExt) else {
+                throw CineoMusicError.invalid("Formato supportato: MP3, WAV, M4A, AIFF o AAC.")
+            }
+            let asset = AVURLAsset(url: source)
+            guard !(try await asset.loadTracks(withMediaType: .audio)).isEmpty else {
+                throw CineoMusicError.invalid("Il file non contiene una traccia audio.")
+            }
+            try FileManager.default.createDirectory(at: musicDirectory, withIntermediateDirectories: true)
+            let destination = musicDirectory.appendingPathComponent(UUID().uuidString + "." + fileExt)
+            try FileManager.default.copyItem(at: source, to: destination)
+            musicAsset = CineoMusicAsset(fileName: destination.lastPathComponent, settings: musicSettings)
+            musicDisplayName = source.lastPathComponent
+            let loadedDuration = try await asset.load(.duration)
+            if loadedDuration.isNumeric && loadedDuration.seconds > 0 {
+                musicSettings.duration = max(10, min(600, loadedDuration.seconds))
+            }
+            prepareMusicPlayer()
+            saveMusicSettings()
+            musicStatus = "Audio importato: \(source.lastPathComponent)"
+        } catch {
+            musicStatus = "Importazione audio fallita: \(error.localizedDescription)"
+        }
+    }
+
+    private func synchronizeMusic(at videoTime: Double) {
+        guard let player = musicPlayer else { return }
+        let position = videoTime - musicSettings.offset
+        let maxLength = min(musicSettings.duration,
+                            musicActualDuration > 0 ? musicActualDuration : musicSettings.duration,
+                            max(0, duration - musicSettings.offset))
+        guard position >= 0, position < maxLength else { player.pause(); return }
+        let current = player.currentTime().seconds
+        if !current.isFinite || abs(current - position) > 0.18 {
+            player.seek(to: CMTime(seconds: position, preferredTimescale: 600),
+                        toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        let fadeUp = musicSettings.fadeIn > 0 ? min(1, position / musicSettings.fadeIn) : 1
+        let remaining = maxLength - position
+        let fadeDown = musicSettings.fadeOut > 0 ? min(1, remaining / musicSettings.fadeOut) : 1
+        player.volume = Float(musicSettings.volume * max(0, min(fadeUp, fadeDown)))
+        if player.rate == 0 { player.play() }
+    }
 
     var outputWidth: Int { portrait ? 1080 : 1920 }
     var outputHeight: Int { portrait ? 1920 : 1080 }
@@ -79,6 +308,8 @@ final class CineoEditorModel: ObservableObject {
         guard !isExporting && !isSavingProject else { return }
         status = "Caricamento del video o progetto…"
         pausePreviewPlayback()
+        musicTask?.cancel()
+        musicPlayer = nil
         previewPlayer = nil
         previewFrameOutput = nil
         previewTask?.cancel()
@@ -134,7 +365,7 @@ final class CineoEditorModel: ObservableObject {
             ])
             item.add(output)
             let player = AVPlayer(playerItem: item)
-            player.isMuted = true
+            player.isMuted = false
             player.actionAtItemEnd = .pause
             previewFrameOutput = output
             previewPlayer = player
@@ -153,6 +384,7 @@ final class CineoEditorModel: ObservableObject {
             sourceURL = mediaURL
             projectURL = openedProject == nil ? nil : url
             restorePlan()
+            restoreMusicSettings()
             status = projectURL == nil
                 ? "Regola lo zoom o scegli un punto. Puoi salvare tutto in un progetto Cineo."
                 : "Progetto Cineo riaperto: puoi modificare ed esportare senza cambiare l'originale."
@@ -190,9 +422,14 @@ final class CineoEditorModel: ObservableObject {
                     )
                 }.value
                 let savedSource = location.appendingPathComponent(manifest.sources[0].relativePath)
+                if let originalMusic = musicURL, let musicAsset {
+                    let copied = location.appendingPathComponent("Media").appendingPathComponent(musicAsset.fileName)
+                    try FileManager.default.copyItem(at: originalMusic, to: copied)
+                }
                 projectURL = location
                 sourceURL = savedSource
                 if savePlan() {
+                    saveMusicSettings()
                     status = "Progetto Cineo salvato: \(location.lastPathComponent)"
                 }
             } catch {
@@ -217,7 +454,7 @@ final class CineoEditorModel: ObservableObject {
             )
             let compiled = try document.compile(duration: duration, over: currentPlan)
 
-            if !keyframes.isEmpty {
+            if !keyframes.isEmpty && (!document.actions.isEmpty || document.stage != nil) {
                 let alert = NSAlert()
                 alert.messageText = "Sostituire gli zoom attuali?"
                 alert.informativeText = "Le azioni importate sostituiranno i keyframe esistenti. " +
@@ -247,6 +484,17 @@ final class CineoEditorModel: ObservableObject {
                 else { style = "Dark" }
                 return
             }
+            if let music = document.music {
+                musicSettings = CineoMusicSettings(
+                    caption: music.caption, bpm: music.bpm, duration: music.duration,
+                    keyscale: music.keyscale, seed: music.seed,
+                    volume: music.volume, offset: music.offset,
+                    fadeIn: music.fadeIn, fadeOut: music.fadeOut)
+                // Music changes do not silently start expensive generation.
+                // Keep the existing audio until the user explicitly regenerates it.
+                saveMusicSettings()
+                musicStatus = "Istruzioni musicali caricate. Premi Genera per applicarle alla traccia."
+            }
             importedActionMarkers = document.actions.compactMap { action in
                 guard let moment = action.time ??
                     action.start.map({ $0 + (action.transition?.in ?? 0) }) else {
@@ -269,6 +517,8 @@ final class CineoEditorModel: ObservableObject {
             return
         }
         pausePreviewPlayback()
+        musicTask?.cancel()
+        musicPlayer = nil
         previewPlayer = nil
         previewFrameOutput = nil
         previewTask?.cancel()
@@ -283,6 +533,7 @@ final class CineoEditorModel: ObservableObject {
     func scrub(_ seconds: Double) {
         pausePreviewPlayback()
         selectedTime = min(max(seconds, 0), max(0, duration - 0.05))
+        refreshMusicPreviewPosition()
         if let state = try? currentPlan.evaluate(
             time: selectedTime, sourceWidth: sourcePixelWidth, sourceHeight: sourcePixelHeight
         ) {
@@ -525,9 +776,11 @@ final class CineoEditorModel: ObservableObject {
         loadingPreview = false
         status = "Anteprima Play: frame già composti con gli effetti Cineo, senza esportazione."
         player.play()
+        synchronizeMusic(at: selectedTime)
     }
 
     func pausePreviewPlayback() {
+        musicPlayer?.pause()
         guard isPreviewPlaying else { return }
         previewPlayer?.pause()
         isPreviewPlaying = false
@@ -548,6 +801,7 @@ final class CineoEditorModel: ObservableObject {
             return
         }
         selectedTime = seconds
+        synchronizeMusic(at: seconds)
         guard output.hasNewPixelBuffer(forItemTime: timestamp),
               let buffer = output.copyPixelBuffer(forItemTime: timestamp,
                                                   itemTimeForDisplay: nil) else { return }
@@ -604,13 +858,27 @@ final class CineoEditorModel: ObservableObject {
         status = "Esportazione in corso: nessun file sorgente verrà modificato."
         exportTask = Task {
             do {
+                let videoOnly = folder.appendingPathComponent("." + UUID().uuidString + "-silent.mp4")
+                defer { try? FileManager.default.removeItem(at: videoOnly) }
                 try await CineoSceneExporter().export(
-                    source: url, destination: dest, plan: plan
+                    source: url, destination: videoOnly, plan: plan
                 ) { [weak self] progress in
-                    Task { @MainActor [weak self] in self?.exportProgress = progress }
+                    Task { @MainActor [weak self] in self?.exportProgress = progress * 0.85 }
                 }
+                let originalAsset = AVURLAsset(url: url)
+                let hasOriginalAudio = !(try await originalAsset.loadTracks(withMediaType: .audio)).isEmpty
+                if musicURL != nil || hasOriginalAudio {
+                    status = "Composizione audio/video e applicazione fade…"
+                    try await CineoAudioMuxer.mux(
+                        video: videoOnly, original: url,
+                        music: musicURL, settings: musicURL == nil ? nil : musicSettings,
+                        destination: dest)
+                } else {
+                    try FileManager.default.moveItem(at: videoOnly, to: dest)
+                }
+                exportProgress = 1
                 outputURL = dest
-                status = "MP4 esportato e verificato: \(dest.lastPathComponent)"
+                status = "MP4 con audio esportato e verificato: \(dest.lastPathComponent)"
             } catch is CancellationError {
                 status = "Esportazione annullata. Il video originale è intatto."
             } catch {
@@ -684,6 +952,12 @@ struct CineoManualEditorView: View {
                 }
                 .disabled(editor.isExporting || editor.isSavingProject || editor.sourceURL == nil)
                 .help("Importa azioni camera.zoom, camera.keyframe e stile da JSON.")
+                Button {
+                    editor.showingMusic = true
+                } label: {
+                    Label("Musica", systemImage: "music.note")
+                }
+                .disabled(editor.sourceURL == nil)
                 Button {
                     editor.showingInstructions = true
                 } label: {
@@ -760,6 +1034,7 @@ struct CineoManualEditorView: View {
                         .help("Fotogramma successivo")
                         .disabled(editor.sourceURL == nil)
                     }
+                    CineoMusicTimelineStrip(editor: editor)
                     if editor.isPreviewPlaying {
                         Text("Anteprima: \(editor.previewActualFPS) fps visualizzati · qualità proxy")
                             .font(.caption.monospacedDigit())
@@ -878,6 +1153,12 @@ struct CineoManualEditorView: View {
             editor.renderPlaybackTick()
         }
         .sheet(isPresented: Binding(
+            get: { editor.showingMusic },
+            set: { editor.showingMusic = $0 }
+        )) {
+            CineoMusicPanel(editor: editor)
+        }
+        .sheet(isPresented: Binding(
             get: { editor.showingInstructions },
             set: { editor.showingInstructions = $0 }
         )) {
@@ -908,9 +1189,22 @@ private struct CineoInstructionsDialog: View {
     @StateObject private var dialog = CineoInstructionsDialogState()
 
     private var currentJSON: String? {
-        try? CineoInstructionDocument.equivalentJSON(
-            for: editor.currentPlan, duration: editor.duration
-        )
+        do {
+            let cameraJSON = try CineoInstructionDocument.equivalentJSON(
+                for: editor.currentPlan, duration: editor.duration)
+            guard var root = try JSONSerialization.jsonObject(with: Data(cameraJSON.utf8)) as? [String: Any] else {
+                return nil
+            }
+            let m = editor.musicSettings
+            let instruction = CineoInstructionDocument.Music(
+                caption: m.caption, bpm: m.bpm, duration: m.duration,
+                keyscale: m.keyscale, seed: m.seed, volume: m.volume,
+                offset: m.offset, fadeIn: m.fadeIn, fadeOut: m.fadeOut)
+            root["music"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(instruction))
+            let data = try JSONSerialization.data(withJSONObject: root,
+                                                  options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+            return String(decoding: data, as: UTF8.self)
+        } catch { return nil }
     }
 
     private var generationError: String {
@@ -944,6 +1238,19 @@ private struct CineoInstructionsDialog: View {
           "transition": {"in": 0.35, "out": 0.4}
         }
       ]
+    }
+    """#
+
+    private let exampleMusic = #"""
+    {
+      "version": 1, "timebase": "output", "actions": [],
+      "music": {
+        "type": "music.generate",
+        "caption": "Minimal electronic instrumental, elegant product demo, warm pads and subtle percussion",
+        "bpm": 110, "duration": 45, "keyscale": "C major",
+        "seed": -1, "volume": 0.4, "offset": 0,
+        "fadeIn": 0.7, "fadeOut": 2.0
+      }
     }
     """#
 
@@ -1034,6 +1341,11 @@ private struct CineoInstructionsDialog: View {
                         NSPasteboard.general.setString(exampleKeyframe, forType: .string)
                         dialog.feedback = "Esempio keyframe copiato. Salvalo come .json e importalo in Studio."
                     }
+                    Button("Copia esempio musica") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(exampleMusic, forType: .string)
+                        dialog.feedback = "Musica copiata. Importa il JSON e poi Genera con ACE-Step dalla UI."
+                    }
                 }
             }
         }
@@ -1043,9 +1355,9 @@ private struct CineoInstructionsDialog: View {
 
     private var currentContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Queste sono le istruzioni equivalenti agli effetti presenti adesso nella timeline.")
+            Text("Queste sono le istruzioni per il video attuale e la configurazione musicale desiderata.")
                 .font(.callout)
-            Text("Per garantire un risultato identico, Cineo usa camera.keyframe. Puoi modificare il montaggio nella UI e riaprire questa finestra per ottenere il JSON aggiornato.")
+            Text("Gli zoom sono riportati come keyframe equivalenti. La sezione music descrive i parametri ACE-Step e il mix, ma non contiene il WAV: per preservare l'audio originale salva il progetto .cineo.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if let json = currentJSON {
@@ -1072,7 +1384,9 @@ private struct CineoInstructionsDialog: View {
                 Text("**camera.keyframe:** una singola inquadratura a time (secondi), target x/y (0–1) e scale (1–3). È la rappresentazione fedele delle modifiche fatte manualmente e del loro easing.")
                 Text("**actions[].id:** identificativo univoco con lettere, numeri, - e _. Non puoi mescolare camera.zoom e camera.keyframe nello stesso file v1.")
                 Text("Importare un file sostituisce gli zoom attuali **solo dopo tua conferma**; le impostazioni stage non specificate rimangono invariate. Effetti non implementati come cursor.highlight, text.callout e tagli vengono rifiutati.")
-                Text("La preview attuale mostra i fotogrammi renderizzati mentre sposti la timeline; Play/Pausa animato è ancora da implementare.")
+                Text("**music:** oggetto opzionale nello stesso JSON. type=music.generate, caption, bpm (40–240), duration (10–600 s), keyscale, seed (-1 casuale), volume (0–1), offset, fadeIn e fadeOut.")
+                Text("Importare music modifica i parametri senza rigenerare automaticamente. Apri «Musica» e premi «Genera con ACE-Step». La traccia audio viene aggiunta a preview ed export.")
+                Text("La preview usa lo stesso compositor video dell'export; l'audio musicale viene riprodotto con un player separato e sincronizzato sul tempo video.")
                     .foregroundStyle(.secondary)
             }
             .font(.callout)
@@ -1096,6 +1410,12 @@ private struct CineoInstructionsDialog: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 exampleCode(exampleKeyframe)
+                Divider()
+                Text("Esempio 3 — Musica ACE-Step in un documento Cineo")
+                    .font(.headline)
+                Text("Modifica la configurazione della musica senza perdere i keyframe esistenti. Nessun suggerimento LLM.")
+                    .font(.caption).foregroundStyle(.secondary)
+                exampleCode(exampleMusic)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
