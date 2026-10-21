@@ -552,6 +552,7 @@ final class CineoEditorModel: ObservableObject {
                 }
                 projectURL = location
                 sourceURL = savedSource
+                if musicAsset != nil { prepareMusicPlayer() }
                 if savePlan() {
                     saveMusicSettings()
                     status = "Progetto Cineo salvato: \(location.lastPathComponent)"
