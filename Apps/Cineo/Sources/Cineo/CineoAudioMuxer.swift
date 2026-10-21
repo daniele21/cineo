@@ -51,7 +51,7 @@ enum CineoAudioMuxer {
             }
             let actualMusicDuration = try await source.load(.duration)
             let available = max(0, duration.seconds - settings.offset)
-            let length = min(available, actualMusicDuration.seconds)
+            let length = min(available, settings.duration, actualMusicDuration.seconds)
             guard length.isFinite, length > 0.02 else {
                 throw CineoMusicError.invalid("Audio musicale troppo corto per il video.")
             }
