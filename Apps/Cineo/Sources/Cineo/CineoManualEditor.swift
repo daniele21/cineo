@@ -377,7 +377,7 @@ final class CineoEditorModel: ObservableObject {
             )
             let compiled = try document.compile(duration: duration, over: currentPlan)
 
-            if !keyframes.isEmpty {
+            if !keyframes.isEmpty && (!document.actions.isEmpty || document.stage != nil) {
                 let alert = NSAlert()
                 alert.messageText = "Sostituire gli zoom attuali?"
                 alert.informativeText = "Le azioni importate sostituiranno i keyframe esistenti. " +
@@ -780,13 +780,27 @@ final class CineoEditorModel: ObservableObject {
         status = "Esportazione in corso: nessun file sorgente verrà modificato."
         exportTask = Task {
             do {
+                let videoOnly = folder.appendingPathComponent("." + UUID().uuidString + "-silent.mp4")
+                defer { try? FileManager.default.removeItem(at: videoOnly) }
                 try await CineoSceneExporter().export(
-                    source: url, destination: dest, plan: plan
+                    source: url, destination: videoOnly, plan: plan
                 ) { [weak self] progress in
-                    Task { @MainActor [weak self] in self?.exportProgress = progress }
+                    Task { @MainActor [weak self] in self?.exportProgress = progress * 0.85 }
                 }
+                let originalAsset = AVURLAsset(url: url)
+                let hasOriginalAudio = !(try await originalAsset.loadTracks(withMediaType: .audio)).isEmpty
+                if musicURL != nil || hasOriginalAudio {
+                    status = "Composizione audio/video e applicazione fade…"
+                    try await CineoAudioMuxer.mux(
+                        video: videoOnly, original: url,
+                        music: musicURL, settings: musicURL == nil ? nil : musicSettings,
+                        destination: dest)
+                } else {
+                    try FileManager.default.moveItem(at: videoOnly, to: dest)
+                }
+                exportProgress = 1
                 outputURL = dest
-                status = "MP4 esportato e verificato: \(dest.lastPathComponent)"
+                status = "MP4 con audio esportato e verificato: \(dest.lastPathComponent)"
             } catch is CancellationError {
                 status = "Esportazione annullata. Il video originale è intatto."
             } catch {
@@ -860,6 +874,12 @@ struct CineoManualEditorView: View {
                 }
                 .disabled(editor.isExporting || editor.isSavingProject || editor.sourceURL == nil)
                 .help("Importa azioni camera.zoom, camera.keyframe e stile da JSON.")
+                Button {
+                    editor.showingMusic = true
+                } label: {
+                    Label("Musica", systemImage: "music.note")
+                }
+                .disabled(editor.sourceURL == nil)
                 Button {
                     editor.showingInstructions = true
                 } label: {
@@ -1054,6 +1074,12 @@ struct CineoManualEditorView: View {
             editor.renderPlaybackTick()
         }
         .sheet(isPresented: Binding(
+            get: { editor.showingMusic },
+            set: { editor.showingMusic = $0 }
+        )) {
+            CineoMusicPanel(editor: editor)
+        }
+        .sheet(isPresented: Binding(
             get: { editor.showingInstructions },
             set: { editor.showingInstructions = $0 }
         )) {
@@ -1084,9 +1110,22 @@ private struct CineoInstructionsDialog: View {
     @StateObject private var dialog = CineoInstructionsDialogState()
 
     private var currentJSON: String? {
-        try? CineoInstructionDocument.equivalentJSON(
-            for: editor.currentPlan, duration: editor.duration
-        )
+        do {
+            let cameraJSON = try CineoInstructionDocument.equivalentJSON(
+                for: editor.currentPlan, duration: editor.duration)
+            guard var root = try JSONSerialization.jsonObject(with: Data(cameraJSON.utf8)) as? [String: Any] else {
+                return nil
+            }
+            let m = editor.musicSettings
+            let instruction = CineoInstructionDocument.Music(
+                caption: m.caption, bpm: m.bpm, duration: m.duration,
+                keyscale: m.keyscale, seed: m.seed, volume: m.volume,
+                offset: m.offset, fadeIn: m.fadeIn, fadeOut: m.fadeOut)
+            root["music"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(instruction))
+            let data = try JSONSerialization.data(withJSONObject: root,
+                                                  options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+            return String(decoding: data, as: UTF8.self)
+        } catch { return nil }
     }
 
     private var generationError: String {
@@ -1120,6 +1159,19 @@ private struct CineoInstructionsDialog: View {
           "transition": {"in": 0.35, "out": 0.4}
         }
       ]
+    }
+    """#
+
+    private let exampleMusic = #"""
+    {
+      "version": 1, "timebase": "output", "actions": [],
+      "music": {
+        "type": "music.generate",
+        "caption": "Minimal electronic instrumental, elegant product demo, warm pads and subtle percussion",
+        "bpm": 110, "duration": 45, "keyscale": "C major",
+        "seed": -1, "volume": 0.4, "offset": 0,
+        "fadeIn": 0.7, "fadeOut": 2.0
+      }
     }
     """#
 
@@ -1210,6 +1262,11 @@ private struct CineoInstructionsDialog: View {
                         NSPasteboard.general.setString(exampleKeyframe, forType: .string)
                         dialog.feedback = "Esempio keyframe copiato. Salvalo come .json e importalo in Studio."
                     }
+                    Button("Copia esempio musica") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(exampleMusic, forType: .string)
+                        dialog.feedback = "Musica copiata. Importa il JSON e poi Genera con ACE-Step dalla UI."
+                    }
                 }
             }
         }
@@ -1219,9 +1276,9 @@ private struct CineoInstructionsDialog: View {
 
     private var currentContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Queste sono le istruzioni equivalenti agli effetti presenti adesso nella timeline.")
+            Text("Queste sono le istruzioni per il video attuale e la configurazione musicale desiderata.")
                 .font(.callout)
-            Text("Per garantire un risultato identico, Cineo usa camera.keyframe. Puoi modificare il montaggio nella UI e riaprire questa finestra per ottenere il JSON aggiornato.")
+            Text("Gli zoom sono riportati come keyframe equivalenti. La sezione music descrive i parametri ACE-Step e il mix, ma non contiene il WAV: per preservare l'audio originale salva il progetto .cineo.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if let json = currentJSON {
@@ -1248,7 +1305,9 @@ private struct CineoInstructionsDialog: View {
                 Text("**camera.keyframe:** una singola inquadratura a time (secondi), target x/y (0–1) e scale (1–3). È la rappresentazione fedele delle modifiche fatte manualmente e del loro easing.")
                 Text("**actions[].id:** identificativo univoco con lettere, numeri, - e _. Non puoi mescolare camera.zoom e camera.keyframe nello stesso file v1.")
                 Text("Importare un file sostituisce gli zoom attuali **solo dopo tua conferma**; le impostazioni stage non specificate rimangono invariate. Effetti non implementati come cursor.highlight, text.callout e tagli vengono rifiutati.")
-                Text("La preview attuale mostra i fotogrammi renderizzati mentre sposti la timeline; Play/Pausa animato è ancora da implementare.")
+                Text("**music:** oggetto opzionale nello stesso JSON. type=music.generate, caption, bpm (40–240), duration (10–600 s), keyscale, seed (-1 casuale), volume (0–1), offset, fadeIn e fadeOut.")
+                Text("Importare music modifica i parametri senza rigenerare automaticamente. Apri «Musica» e premi «Genera con ACE-Step». La traccia audio viene aggiunta a preview ed export.")
+                Text("La preview usa lo stesso compositor video dell'export; l'audio musicale viene riprodotto con un player separato e sincronizzato sul tempo video.")
                     .foregroundStyle(.secondary)
             }
             .font(.callout)
@@ -1272,6 +1331,12 @@ private struct CineoInstructionsDialog: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 exampleCode(exampleKeyframe)
+                Divider()
+                Text("Esempio 3 — Musica ACE-Step in un documento Cineo")
+                    .font(.headline)
+                Text("Modifica la configurazione della musica senza perdere i keyframe esistenti. Nessun suggerimento LLM.")
+                    .font(.caption).foregroundStyle(.secondary)
+                exampleCode(exampleMusic)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
