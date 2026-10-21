@@ -193,8 +193,10 @@ final class CineoEditorModel: ObservableObject {
                     toleranceBefore: .zero, toleranceAfter: .zero)
         let elapsed = selectedTime - musicSettings.offset
         let playable = musicClipLength
-        let rampIn = musicSettings.fadeIn > 0 ? min(1, elapsed / musicSettings.fadeIn) : 1
-        let rampOut = musicSettings.fadeOut > 0 ? min(1, (playable - elapsed) / musicSettings.fadeOut) : 1
+        let fadeIn = min(musicSettings.fadeIn, playable / 2)
+        let fadeOut = min(musicSettings.fadeOut, playable / 2)
+        let rampIn = fadeIn > 0 ? min(1, elapsed / fadeIn) : 1
+        let rampOut = fadeOut > 0 ? min(1, (playable - elapsed) / fadeOut) : 1
         player.volume = Float(musicSettings.volume * max(0, min(rampIn, rampOut)))
         if isPreviewPlaying && player.rate == 0 { player.play() }
         if !isPreviewPlaying { player.pause() }
@@ -405,9 +407,12 @@ final class CineoEditorModel: ObservableObject {
                         toleranceBefore: .zero, toleranceAfter: .zero)
         }
         let local = videoTime - musicSettings.offset
-        let fadeUp = musicSettings.fadeIn > 0 ? min(1, local / musicSettings.fadeIn) : 1
-        let remaining = musicClipLength - local
-        let fadeDown = musicSettings.fadeOut > 0 ? min(1, remaining / musicSettings.fadeOut) : 1
+        let playable = musicClipLength
+        let fadeIn = min(musicSettings.fadeIn, playable / 2)
+        let fadeOut = min(musicSettings.fadeOut, playable / 2)
+        let fadeUp = fadeIn > 0 ? min(1, local / fadeIn) : 1
+        let remaining = playable - local
+        let fadeDown = fadeOut > 0 ? min(1, remaining / fadeOut) : 1
         player.volume = Float(musicSettings.volume * max(0, min(fadeUp, fadeDown)))
         if player.rate == 0 { player.play() }
     }
@@ -968,6 +973,11 @@ final class CineoEditorModel: ObservableObject {
         guard let url = sourceURL, !isExporting else { return }
         pausePreviewPlayback()
         let plan = currentPlan
+        // Freeze the music plan at export start; UI changes must not alter a
+        // render already in progress.
+        let exportMusicURL = musicURL
+        let exportMusicSettings = musicSettings
+        let exportMusicClip = musicClip
         let folder = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Cineo/Edited", isDirectory: true)
         do {
@@ -995,12 +1005,13 @@ final class CineoEditorModel: ObservableObject {
                 }
                 let originalAsset = AVURLAsset(url: url)
                 let hasOriginalAudio = !(try await originalAsset.loadTracks(withMediaType: .audio)).isEmpty
-                if musicURL != nil || hasOriginalAudio {
+                if exportMusicURL != nil || hasOriginalAudio {
                     status = "Composizione audio/video e applicazione fade…"
                     try await CineoAudioMuxer.mux(
                         video: videoOnly, original: url,
-                        music: musicURL, settings: musicURL == nil ? nil : musicSettings,
-                        clip: musicClip, destination: dest)
+                        music: exportMusicURL,
+                        settings: exportMusicURL == nil ? nil : exportMusicSettings,
+                        clip: exportMusicClip, destination: dest)
                 } else {
                     try FileManager.default.moveItem(at: videoOnly, to: dest)
                 }
