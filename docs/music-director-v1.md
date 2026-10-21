@@ -42,7 +42,7 @@ Don't run the upstream `server.sh` as-is on an untrusted network: it binds
 4. Press Play to preview the music alongside Cineo's composed video frames.
 5. Export MP4. Original narration, if present, is retained and mixed with music.
 
-Alternatively, import WAV/MP3/M4A/AIFF/AAC. Imported bytes and generated WAVs
+Alternatively, import WAV/MP3/M4A/AIFF/AAC. The music clip now appears directly below the video scrubber in Studio. Drag its timeline strip to move the music start, or use the offset slider in Musica for precise positioning. The Musica panel shows the source filename and length, playback duration, volume, fades, Play/Pause, remove, replace, show in Finder and 'Inizia qui' (align to current video playhead). Removing a track detaches it from the edit without deleting the original audio. Imported bytes and generated WAVs
 live in the project package's `Media/` directory or under the user's
 `Movies/Cineo/Music/` directory for standalone videos.
 
@@ -89,7 +89,7 @@ when an exact WAV must be retained. Exports are never written over originals.
 
 ## Known limits & release gates
 
-- Manual alignment: offset, BPM, duration, fade and UI listening. Generated
+- Manual alignment: visible clip on the same video timeline, draggable offset, duration, volume, fade and UI listening. The strip is a **clip envelope, not an analyzed waveform**. Generated
   audio is **not guaranteed** to hit a precise beat at a requested timestamp.
 - No LLM suggestions, video detection, beat detection, automatic camera
   retiming, stem editing, waveform editor, built-in model downloads, automatic
