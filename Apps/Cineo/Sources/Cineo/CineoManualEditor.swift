@@ -616,6 +616,9 @@ final class CineoEditorModel: ObservableObject {
                     fadeIn: music.fadeIn, fadeOut: music.fadeOut)
                 // Music changes do not silently start expensive generation.
                 // Keep the existing audio until the user explicitly regenerates it.
+                musicClip = CineoMusicClip(sourceIn: music.sourceIn ?? 0,
+                                           duration: music.clipDuration, loop: music.loop ?? false)
+                suggestedBeatAlignment = nil
                 saveMusicSettings()
                 musicStatus = "Istruzioni musicali caricate. Premi Genera per applicarle alla traccia."
             }
@@ -1323,7 +1326,10 @@ private struct CineoInstructionsDialog: View {
             let instruction = CineoInstructionDocument.Music(
                 caption: m.caption, bpm: m.bpm, duration: m.duration,
                 keyscale: m.keyscale, seed: m.seed, volume: m.volume,
-                offset: m.offset, fadeIn: m.fadeIn, fadeOut: m.fadeOut)
+                offset: m.offset, fadeIn: m.fadeIn, fadeOut: m.fadeOut,
+                sourceIn: editor.musicClip.sourceIn,
+                clipDuration: editor.musicClip.duration,
+                loop: editor.musicClip.loop)
             root["music"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(instruction))
             let data = try JSONSerialization.data(withJSONObject: root,
                                                   options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
@@ -1373,7 +1379,8 @@ private struct CineoInstructionsDialog: View {
         "caption": "Minimal electronic instrumental, elegant product demo, warm pads and subtle percussion",
         "bpm": 110, "duration": 45, "keyscale": "C major",
         "seed": -1, "volume": 0.4, "offset": 0,
-        "fadeIn": 0.7, "fadeOut": 2.0
+        "fadeIn": 0.7, "fadeOut": 2.0,
+        "sourceIn": 0, "clipDuration": 20, "loop": false
       }
     }
     """#
