@@ -166,6 +166,7 @@ final class CineoEditorModel: ObservableObject {
         let rampIn = musicSettings.fadeIn > 0 ? min(1, sourceTime / musicSettings.fadeIn) : 1
         let rampOut = musicSettings.fadeOut > 0 ? min(1, (playable - sourceTime) / musicSettings.fadeOut) : 1
         player.volume = Float(musicSettings.volume * max(0, min(rampIn, rampOut)))
+        if isPreviewPlaying && player.rate == 0 { player.play() }
         if !isPreviewPlaying { player.pause() }
     }
 
