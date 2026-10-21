@@ -26,8 +26,8 @@ struct CineoMusicTimelineStrip: View {
                             let total = max(0.1, editor.duration)
                             let offset = editor.musicSettings.offset
                             let length = editor.musicClipLength
-                            let startX = size.width * offset / total
-                            let clipWidth = max(0, size.width * length / total)
+                            let startX = size.width * CGFloat(offset / total)
+                            let clipWidth = max(0, size.width * CGFloat(length / total))
                             let background = CGRect(x: 0, y: 0, width: size.width, height: size.height)
                             context.fill(Path(roundedRect: background, cornerRadius: 5),
                                          with: .color(.secondary.opacity(0.12)))
@@ -48,7 +48,7 @@ struct CineoMusicTimelineStrip: View {
                                         guard sourceTime >= segment.sourceStart,
                                               sourceTime < segment.sourceStart + segment.duration else { continue }
                                         let videoTime = segment.timelineStart + sourceTime - segment.sourceStart
-                                        let x = size.width * videoTime / total
+                                        let x = size.width * CGFloat(videoTime / total)
                                         let h = max(1.5, CGFloat(amplitude) * size.height * 0.45)
                                         waves.move(to: CGPoint(x: x, y: size.height / 2 - h))
                                         waves.addLine(to: CGPoint(x: x, y: size.height / 2 + h))
@@ -60,7 +60,7 @@ struct CineoMusicTimelineStrip: View {
                                     for onset in analysis.onsets {
                                         guard onset >= segment.sourceStart,
                                               onset < segment.sourceStart + segment.duration else { continue }
-                                        let x = size.width * (segment.timelineStart + onset - segment.sourceStart) / total
+                                        let x = size.width * CGFloat((segment.timelineStart + onset - segment.sourceStart) / total)
                                         accents.move(to: CGPoint(x: x, y: 0))
                                         accents.addLine(to: CGPoint(x: x, y: size.height))
                                     }
@@ -68,7 +68,7 @@ struct CineoMusicTimelineStrip: View {
                                 context.stroke(accents, with: .color(.orange.opacity(0.85)), lineWidth: 1)
                             }
                             let playheadX = max(0, min(size.width - 2,
-                                size.width * editor.selectedTime / total))
+                                size.width * CGFloat(editor.selectedTime / total)))
                             var playhead = Path()
                             playhead.move(to: CGPoint(x: playheadX, y: 0))
                             playhead.addLine(to: CGPoint(x: playheadX, y: size.height))
