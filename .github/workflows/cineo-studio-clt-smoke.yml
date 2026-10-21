@@ -5,6 +5,7 @@ on:
     paths:
       - 'Apps/Cineo/**'
       - 'Packages/CineoScene/**'
+      - 'Packages/CineoMusic/**'
       - '.github/workflows/cineo-studio-clt-smoke.yml'
   workflow_dispatch:
 
@@ -22,6 +23,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run deterministic plan, timebase and crop tests
         run: swift test --package-path Packages/CineoScene
+
+  music-contract:
+    name: Local ACE-Step request and multipart contract
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.2
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test local music adapter (no model required)
+        run: swift test --package-path Packages/CineoMusic
 
   real-frames-synthetic:
     name: Native H264 edited frame export without Xcode
