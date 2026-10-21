@@ -32,11 +32,17 @@ public struct CineoInstructionDocument: Codable, Sendable {
         public let offset: Double
         public let fadeIn: Double
         public let fadeOut: Double
+        /// Optional source-relative clip edit, separate from generation duration.
+        public let sourceIn: Double?
+        public let clipDuration: Double?
+        public let loop: Bool?
 
         public init(type: String = "music.generate", caption: String, bpm: Int,
                     duration: Double, keyscale: String, seed: Int64 = -1,
                     volume: Double = 0.4, offset: Double = 0,
-                    fadeIn: Double = 0.6, fadeOut: Double = 1.5) {
+                    fadeIn: Double = 0.6, fadeOut: Double = 1.5,
+                    sourceIn: Double? = nil, clipDuration: Double? = nil,
+                    loop: Bool? = nil) {
             self.type = type
             self.caption = caption
             self.bpm = bpm
@@ -47,6 +53,9 @@ public struct CineoInstructionDocument: Codable, Sendable {
             self.offset = offset
             self.fadeIn = fadeIn
             self.fadeOut = fadeOut
+            self.sourceIn = sourceIn
+            self.clipDuration = clipDuration
+            self.loop = loop
         }
 
         public func validate(videoDuration: Double) throws {
@@ -61,7 +70,10 @@ public struct CineoInstructionDocument: Codable, Sendable {
                   volume.isFinite, (0...1).contains(volume),
                   offset.isFinite, offset >= 0, offset < videoDuration,
                   fadeIn.isFinite, (0...duration).contains(fadeIn),
-                  fadeOut.isFinite, (0...duration).contains(fadeOut) else {
+                  fadeOut.isFinite, (0...duration).contains(fadeOut),
+                  sourceIn == nil || (sourceIn!.isFinite && sourceIn! >= 0),
+                  clipDuration == nil || (clipDuration!.isFinite && clipDuration! >= 0.04)
+                  else {
                 throw CineoInstructionError.invalid("music: valori mancanti o fuori intervallo.")
             }
         }
@@ -147,7 +159,8 @@ public struct CineoInstructionDocument: Codable, Sendable {
                 throw CineoInstructionError.invalid("music deve essere un oggetto.")
             }
             try fields(music, allowed: ["type", "caption", "bpm", "duration", "keyscale",
-                                       "seed", "volume", "offset", "fadeIn", "fadeOut"], at: "music")
+                                       "seed", "volume", "offset", "fadeIn", "fadeOut",
+                                       "sourceIn", "clipDuration", "loop"], at: "music")
         }
         if let raw = root["stage"] {
             guard let stage = raw as? [String: Any] else {

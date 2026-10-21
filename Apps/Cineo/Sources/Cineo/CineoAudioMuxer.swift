@@ -6,7 +6,8 @@ import CineoMusic
 /// rendered Cineo video. Never changes the original recording or rendered input.
 enum CineoAudioMuxer {
     static func mux(video: URL, original: URL, music: URL?,
-                    settings: CineoMusicSettings?, destination: URL) async throws {
+                    settings: CineoMusicSettings?, clip: CineoMusicClip = .init(),
+                    destination: URL) async throws {
         let videoAsset = AVURLAsset(url: video)
         let vTracks = try await videoAsset.loadTracks(withMediaType: .video)
         guard let videoTrack = vTracks.first else { throw CineoMusicError.invalid("Video renderizzato senza traccia video.") }
@@ -50,15 +51,22 @@ enum CineoAudioMuxer {
                 throw CineoMusicError.invalid("Impossibile aggiungere la traccia musicale.")
             }
             let actualMusicDuration = try await source.load(.duration)
-            let available = max(0, duration.seconds - settings.offset)
-            let length = min(available, settings.duration, actualMusicDuration.seconds)
-            guard length.isFinite, length > 0.02 else {
+            let segments = try clip.segments(sourceDuration: actualMusicDuration.seconds,
+                                             videoDuration: duration.seconds, offset: settings.offset)
+            guard let last = segments.last else {
                 throw CineoMusicError.invalid("Audio musicale troppo corto per il video.")
             }
+            for part in segments {
+                try Task.checkCancellation()
+                let sourceRange = CMTimeRange(
+                    start: CMTime(seconds: part.sourceStart, preferredTimescale: 600),
+                    duration: CMTime(seconds: part.duration, preferredTimescale: 600))
+                try target.insertTimeRange(sourceRange, of: sourceTrack,
+                    at: CMTime(seconds: part.timelineStart, preferredTimescale: 600))
+            }
+            // The envelope follows the *whole arranged clip*, not each loop.
             let start = CMTime(seconds: settings.offset, preferredTimescale: 600)
-            let range = CMTimeRange(start: .zero,
-                                    duration: CMTime(seconds: length, preferredTimescale: 600))
-            try target.insertTimeRange(range, of: sourceTrack, at: start)
+            let length = last.timelineStart + last.duration - settings.offset
             let p = AVMutableAudioMixInputParameters(track: target)
             let inSeconds = min(settings.fadeIn, length / 2)
             let outSeconds = min(settings.fadeOut, length / 2)
@@ -68,11 +76,11 @@ enum CineoAudioMuxer {
                                 timeRange: CMTimeRange(start: start,
                                     duration: CMTime(seconds: inSeconds, preferredTimescale: 600)))
             }
-            let endStart = length - outSeconds
             if outSeconds > 0 {
                 p.setVolumeRamp(fromStartVolume: Float(settings.volume), toEndVolume: 0,
                                 timeRange: CMTimeRange(
-                                    start: CMTimeAdd(start, CMTime(seconds: endStart, preferredTimescale: 600)),
+                                    start: CMTime(seconds: settings.offset + length - outSeconds,
+                                                  preferredTimescale: 600),
                                     duration: CMTime(seconds: outSeconds, preferredTimescale: 600)))
             }
             parameters.append(p)

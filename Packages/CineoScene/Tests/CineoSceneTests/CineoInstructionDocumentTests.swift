@@ -224,6 +224,24 @@ struct CineoInstructionDocumentTests {
         #expect(output == old)
     }
 
+    @Test func musicClipRoundTripsThroughStrictJSONAndPreservesCamera() throws {
+        let json = """
+        {"version":1,"timebase":"output","actions":[],
+         "music":{"type":"music.generate","caption":"Percussive synth","bpm":110,
+                  "duration":30,"keyscale":"C major","seed":3,
+                  "volume":0.3,"offset":1,"fadeIn":0.5,"fadeOut":1.0,
+                  "sourceIn":2.5,"clipDuration":13.5,"loop":true}}
+        """
+        let document = try CineoInstructionDocument.decode(Data(json.utf8))
+        #expect(document.music?.sourceIn == 2.5)
+        #expect(document.music?.clipDuration == 13.5)
+        #expect(document.music?.loop == true)
+        let stored = try JSONEncoder().encode(document)
+        let restored = try CineoInstructionDocument.decode(stored)
+        #expect(restored.music?.clipDuration == 13.5)
+        #expect(try document.compile(duration: 40, over: base) == base)
+    }
+
     @Test func musicRejectsUnknownFieldsAndInvalidBPM() {
         let extra = """
         {"version":1,"timebase":"output","actions":[],
