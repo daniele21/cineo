@@ -20,7 +20,7 @@ struct CineoApp: App {
                         editor.close()
                     }
                 } else {
-                    CaptureDashboard(recorder: recorder) { url in
+                    CaptureDashboard(recorder: recorder, editor: editor) { url in
                         Task { await editor.open(url) }
                     }
                 }
@@ -70,6 +70,7 @@ struct CaptureLogEntry: Identifiable {
 
 private struct CaptureDashboard: View {
     @ObservedObject var recorder: CineoScreenRecorder
+    @ObservedObject var editor: CineoEditorModel
     let onEditVideo: (URL) -> Void
 
     private var buildRevision: String {
@@ -109,6 +110,12 @@ private struct CaptureDashboard: View {
                 }
             }
             Divider()
+            HStack {
+                Text("Lavori musicali in background")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                CineoMusicQueueButton(editor: editor)
+            }
             Text("Capture your display to a local H.264 MP4.")
                 .font(.headline)
             HStack(spacing: 12) {
