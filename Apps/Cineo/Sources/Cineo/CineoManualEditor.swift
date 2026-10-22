@@ -83,6 +83,8 @@ final class CineoEditorModel: ObservableObject {
     private var musicTask: Task<Void, Never>?
     private var musicPlayer: AVPlayer?
     private var musicCrossfadePlayer: AVPlayer?
+    private var cuePreviewPlayers: [AVAudioPlayer] = []
+    private var lastCuePreviewTime: Double?
     private var originalAudioAnalysisTask: Task<Void, Never>?
     private var musicAnalysisTask: Task<Void, Never>?
     private var musicDragInitialOffset: Double?
@@ -268,6 +270,54 @@ final class CineoEditorModel: ObservableObject {
         musicCues.removeAll { $0.id == id }
         suggestedCueCamera = nil
         saveMusicSettings()
+    }
+
+    func updateCueSound(_ id: String, enabled: Bool? = nil, volume: Double? = nil) {
+        guard !isExporting, let index = musicCues.firstIndex(where: { $0.id == id }) else { return }
+        let before = musicCues
+        if let enabled { musicCues[index].soundEnabled = enabled }
+        if let volume { musicCues[index].soundVolume = min(1, max(0, volume)) }
+        do {
+            _ = try CineoCueSoundPlanner.plan(cues: musicCues, videoDuration: duration)
+            saveMusicSettings()
+        } catch {
+            musicCues = before
+            musicStatus = error.localizedDescription
+        }
+    }
+
+    private func playCueSound(_ event: CineoCueSoundEvent) {
+        do {
+            let player = try AVAudioPlayer(data: CineoProceduralCueAudio.wav(event: event))
+            player.volume = Float(event.volume)
+            player.prepareToPlay()
+            cuePreviewPlayers.removeAll { !$0.isPlaying }
+            cuePreviewPlayers.append(player)
+            player.play()
+        } catch {
+            musicStatus = "Anteprima effetto cue non disponibile: \(error.localizedDescription)"
+        }
+    }
+
+    func previewCueSound(_ id: String) {
+        do {
+            let events = try CineoCueSoundPlanner.plan(
+                cues: musicCues, videoDuration: duration)
+            guard let event = events.first(where: { $0.id == id }) else { return }
+            playCueSound(event)
+        } catch { musicStatus = error.localizedDescription }
+    }
+
+    private func synchronizeCueSoundPreview(at time: Double) {
+        guard isPreviewPlaying else { return }
+        let previous = lastCuePreviewTime ?? (time - 0.001)
+        lastCuePreviewTime = time
+        guard time >= previous, time - previous <= 0.6,
+              let events = try? CineoCueSoundPlanner.plan(
+                cues: musicCues, videoDuration: duration) else { return }
+        for cue in events where cue.start > previous && cue.start <= time + 0.01 {
+            playCueSound(cue)
+        }
     }
 
     /// Convert a manually authored cue into a camera edit only after preview
@@ -1191,12 +1241,16 @@ final class CineoEditorModel: ObservableObject {
         loadingPreview = false
         status = "Anteprima Play: frame già composti con gli effetti Cineo, senza esportazione."
         player.play()
+        lastCuePreviewTime = selectedTime - 0.001
         synchronizeMusic(at: selectedTime)
     }
 
     func pausePreviewPlayback() {
         musicPlayer?.pause()
         musicCrossfadePlayer?.pause()
+        for player in cuePreviewPlayers { player.stop() }
+        cuePreviewPlayers.removeAll()
+        lastCuePreviewTime = nil
         guard isPreviewPlaying else { return }
         previewPlayer?.pause()
         isPreviewPlaying = false
@@ -1218,6 +1272,7 @@ final class CineoEditorModel: ObservableObject {
         }
         selectedTime = seconds
         synchronizeMusic(at: seconds)
+        synchronizeCueSoundPreview(at: seconds)
         guard output.hasNewPixelBuffer(forItemTime: timestamp),
               let buffer = output.copyPixelBuffer(forItemTime: timestamp,
                                                   itemTimeForDisplay: nil) else { return }
@@ -1263,6 +1318,14 @@ final class CineoEditorModel: ObservableObject {
         let exportMusicClip = musicClip
         let exportDucking = duckingSettings
         let exportDuckingRanges = musicDuckingRanges
+        let exportCueSounds: [CineoCueSoundEvent]
+        do {
+            exportCueSounds = try CineoCueSoundPlanner.plan(
+                cues: musicCues, videoDuration: duration)
+        } catch {
+            status = "Effetti cue non validi: (error.localizedDescription)"
+            return
+        }
         let folder = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Cineo/Edited", isDirectory: true)
         do {
@@ -1301,7 +1364,7 @@ final class CineoEditorModel: ObservableObject {
                         duration: analysis.sourceDuration,
                         threshold: exportDucking.threshold)
                 }
-                if exportMusicURL != nil || hasOriginalAudio {
+                if exportMusicURL != nil || hasOriginalAudio || !exportCueSounds.isEmpty {
                     status = "Composizione audio/video e applicazione fade…"
                     try await CineoAudioMuxer.mux(
                         video: videoOnly, original: url,
@@ -1309,7 +1372,7 @@ final class CineoEditorModel: ObservableObject {
                         settings: exportMusicURL == nil ? nil : exportMusicSettings,
                         clip: exportMusicClip,
                         ducking: exportDucking, duckingRanges: resolvedDuckingRanges,
-                        destination: dest)
+                        cueSounds: exportCueSounds, destination: dest)
                 } else {
                     try FileManager.default.moveItem(at: videoOnly, to: dest)
                 }
