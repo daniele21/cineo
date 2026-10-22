@@ -1486,6 +1486,7 @@ struct CineoManualEditorView: View {
                     Label("Musica", systemImage: "music.note")
                 }
                 .disabled(editor.sourceURL == nil)
+                CineoMusicQueueButton(editor: editor)
                 Button {
                     editor.showingInstructions = true
                 } label: {
