@@ -50,6 +50,9 @@ final class CineoEditorModel: ObservableObject {
     @Published private(set) var hasPointerEvents = false
     @Published private(set) var autoEditShotCount = 0
     @Published private(set) var autoEditPreviewEnabled = false
+    @Published private(set) var autoEditShots: [CameraShot] = []
+    @Published private(set) var autoEditSelectedIndices = Set<Int>()
+    var autoEditSelectedCount: Int { autoEditSelectedIndices.count }
     private var pointerSidecar: CineoPointerSidecar?
     private var autoEditCamera: [CineoCameraKeyframe] = []
     @Published private(set) var importedActionMarkers: [ImportedActionMarker] = []
@@ -771,7 +774,7 @@ final class CineoEditorModel: ObservableObject {
         return CineoScenePlan(
             outputWidth: outputWidth, outputHeight: outputHeight,
             paddingFraction: padding, background: color,
-            camera: (autoEditPreviewEnabled ? autoEditCamera : keyframes)
+            camera: (autoEditPreviewEnabled && !autoEditCamera.isEmpty ? autoEditCamera : keyframes)
                 .sorted { $0.time < $1.time }
         )
     }
@@ -783,6 +786,8 @@ final class CineoEditorModel: ObservableObject {
         }
         let draft = CineoAutoEditPlanner().propose(
             sidecar: pointerSidecar, duration: duration, preset: autoEditPreset)
+        autoEditShots = draft.shots
+        autoEditSelectedIndices = Set(draft.shots.indices)
         autoEditShotCount = draft.shots.count
         autoEditCamera = draft.keyframes
         autoEditPreviewEnabled = !draft.isEmpty
@@ -794,15 +799,40 @@ final class CineoEditorModel: ObservableObject {
         refreshPreview()
     }
 
+    func isAutoEditShotSelected(_ index: Int) -> Bool {
+        autoEditSelectedIndices.contains(index)
+    }
+
+    /// A shot can be disabled individually without modifying the manual
+    /// scene, the source movie, or the stored project.
+    func setAutoEditShot(_ index: Int, selected: Bool) {
+        guard autoEditPreviewEnabled, autoEditShots.indices.contains(index) else { return }
+        pausePreviewPlayback()
+        if selected { autoEditSelectedIndices.insert(index) }
+        else { autoEditSelectedIndices.remove(index) }
+        let accepted = autoEditShots.enumerated().compactMap { index, shot in
+            autoEditSelectedIndices.contains(index) ? shot : nil
+        }
+        autoEditCamera = CineoAutoEditPlanner().keyframes(for: accepted, duration: duration)
+        status = "Revisione Smart Camera: \(accepted.count) zoom selezionati su \(autoEditShots.count)."
+        refreshPreview()
+    }
+
     func discardAutoEditProposal() {
         autoEditPreviewEnabled = false
         autoEditCamera = []
+        autoEditShots = []
+        autoEditSelectedIndices = []
         autoEditShotCount = 0
         refreshPreview()
     }
 
     func applyAutoEditProposal() {
-        guard autoEditPreviewEnabled, !autoEditCamera.isEmpty else { return }
+        guard autoEditPreviewEnabled, !autoEditCamera.isEmpty,
+              !autoEditSelectedIndices.isEmpty else {
+            status = "Seleziona almeno una proposta prima di applicarla."
+            return
+        }
         if !keyframes.isEmpty {
             let alert = NSAlert()
             alert.messageText = "Sostituire gli zoom manuali?"
@@ -813,16 +843,22 @@ final class CineoEditorModel: ObservableObject {
         }
         let previous = keyframes
         let applied = autoEditCamera
-        autoEditPreviewEnabled = false
+        let count = autoEditSelectedIndices.count
         keyframes = applied
         guard savePlan() else {
             keyframes = previous
             status = "Salvataggio degli zoom fallito. Modifiche manuali ripristinate."
+            refreshPreview()
             return
         }
+        // Release the transient proposal only after the durable save.
+        autoEditPreviewEnabled = false
         autoEditCamera = []
+        autoEditShots = []
+        autoEditSelectedIndices = []
+        autoEditShotCount = 0
         importedActionMarkers = []
-        status = "Smart Camera applicata: \(autoEditShotCount) sequenze; ogni keyframe resta modificabile."
+        status = "Smart Camera applicata: \(count) sequenze; ogni keyframe resta modificabile."
         refreshPreview()
     }
 
@@ -835,6 +871,8 @@ final class CineoEditorModel: ObservableObject {
         }
         hasPointerEvents = !(pointerSidecar?.events.isEmpty ?? true)
         autoEditCamera = []
+        autoEditShots = []
+        autoEditSelectedIndices = []
         autoEditShotCount = 0
         autoEditPreviewEnabled = false
     }
@@ -1758,11 +1796,38 @@ struct CineoManualEditorView: View {
                     Button("Genera proposte dai click") { editor.proposeAutoEdit() }
                         .disabled(!editor.hasPointerEvents || editor.isExporting)
                     if editor.autoEditPreviewEnabled {
-                        Text("\(editor.autoEditShotCount) zoom suggeriti. La preview è temporanea, non ha modificato il progetto.")
+                        Text("\(editor.autoEditSelectedCount) su \(editor.autoEditShotCount) proposte attive. Nessuna modifica salvata.")
                             .font(.caption).foregroundStyle(.secondary)
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 7) {
+                                ForEach(editor.autoEditShots.indices, id: \.self) { index in
+                                    let shot = editor.autoEditShots[index]
+                                    HStack(spacing: 5) {
+                                        Toggle(isOn: Binding(
+                                            get: { editor.isAutoEditShotSelected(index) },
+                                            set: { editor.setAutoEditShot(index, selected: $0) }
+                                        )) {
+                                            Text(String(format: "Zoom %d · %.1f×", index + 1, shot.zoom))
+                                        }
+                                        .toggleStyle(.checkbox)
+                                        .font(.caption)
+                                        Button("Vai") {
+                                            editor.scrub(min(editor.duration - 0.05,
+                                                              shot.start + min(0.35, (shot.end-shot.start) * 0.25)))
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .font(.caption2)
+                                        .help(String(format: "%.1f–%.1f s · %@", shot.start,
+                                                     shot.end, shot.reason.rawValue))
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 150)
                         HStack {
                             Button("Applica zoom") { editor.applyAutoEditProposal() }
                                 .buttonStyle(.borderedProminent)
+                                .disabled(editor.autoEditSelectedCount == 0)
                             Button("Annulla") { editor.discardAutoEditProposal() }
                         }
                     } else if !editor.hasPointerEvents {
