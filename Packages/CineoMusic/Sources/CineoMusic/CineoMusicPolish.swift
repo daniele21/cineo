@@ -126,19 +126,26 @@ public struct CineoMusicCue: Codable, Equatable, Identifiable, Sendable {
     public var at: Double
     public var kind: CineoMusicCueKind
     public var label: String
+    /// Nil means disabled for backward-compatible project files.
+    public var soundEnabled: Bool?
+    public var soundVolume: Double?
 
     public init(id: String = UUID().uuidString, at: Double, kind: CineoMusicCueKind,
-                label: String = "") {
+                label: String = "", soundEnabled: Bool? = nil, soundVolume: Double? = nil) {
         self.id = id
         self.at = at
         self.kind = kind
         self.label = label
+        self.soundEnabled = soundEnabled
+        self.soundVolume = soundVolume
     }
 
     public func validate(videoDuration: Double) throws {
         guard !id.isEmpty, id.count < 100,
               at.isFinite, at >= 0, at < videoDuration,
-              label.utf8.count <= 80 else {
+              label.utf8.count <= 80,
+              soundVolume == nil || (soundVolume!.isFinite && (0...1).contains(soundVolume!))
+              else {
             throw CineoMusicError.invalid("Cue musicale non valido.")
         }
     }
