@@ -86,6 +86,18 @@ struct CameraPlannerTests {
         #expect(shots.filter { $0.start < 60 }.count <= 5)
     }
 
+    @Test func denseClicksDoNotCreateDelayedOffTargetZooms() {
+        let events = [
+            AttentionEvent(time: 1.0, x: 0.10, y: 0.10, kind: .click),
+            AttentionEvent(time: 2.3, x: 0.90, y: 0.90, kind: .click),
+            AttentionEvent(time: 7.0, x: 0.20, y: 0.80, kind: .click)
+        ]
+        let shots = CameraPlanner().suggest(events: events, duration: 12)
+        #expect(shots.count == 2)
+        #expect(shots[0].start <= 1.0)
+        #expect(shots[1].start <= 7.0)
+    }
+
     @Test func nearEndEventCannotProduceOutOfBoundsShot() {
         let events = [
             AttentionEvent(time: 1, x: 0.2, y: 0.2, kind: .click),
