@@ -17,6 +17,7 @@ final class CineoACEBackendController: ObservableObject {
     @Published private(set) var isManaged = false
     @Published private(set) var selectedRoot: URL?
 
+    let downloader = CineoACEModelDownloader()
     private let locationKey = "Cineo.music.aceBackendDirectory"
     private var server: Process?
     private var outputPipe: Pipe?
@@ -47,7 +48,7 @@ final class CineoACEBackendController: ObservableObject {
     }
 
     func chooseFolder() {
-        guard !isBusy, server?.isRunning != true else {
+        guard !isBusy, !downloader.isDownloading, server?.isRunning != true else {
             detail = "Arresta prima il server avviato da Cineo."
             return
         }
@@ -101,7 +102,7 @@ final class CineoACEBackendController: ObservableObject {
     }
 
     func start() {
-        guard server?.isRunning != true, !isBusy else { return }
+        guard server?.isRunning != true, !isBusy, !downloader.isDownloading else { return }
         guard let installation else {
             phase = .missing
             detail = "Seleziona prima la cartella acestep.cpp."
@@ -137,7 +138,9 @@ final class CineoACEBackendController: ObservableObject {
                     self.outputPipe = nil
                     self.server = nil
                     self.isManaged = false
-                    if self.phase != .stopped {
+                    if self.phase == .stopped {
+                        self.detail = "Motore ACE-Step arrestato."
+                    } else {
                         self.phase = .failed
                         self.detail = "ACE-Step terminato (codice \(code)). Controlla i log."
                     }
