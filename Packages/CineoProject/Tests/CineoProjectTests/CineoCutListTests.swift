@@ -24,6 +24,18 @@ struct CineoCutListTests {
         #expect(cut.outputTime(forSourceSeconds: 10) == 5)
     }
 
+    @Test func multipleCutsInOutputTimeRetainOriginalSourceMapping() throws {
+        let initial = try CineoCutList(sourceDuration: 20)
+        let first = try initial.removingOutputRange(start: 5, end: 10)
+        let second = try first.removingOutputRange(start: 3, end: 7)
+        #expect(second.retained == [.init(start: 0, end: 3),
+                                     .init(start: 12, end: 20)])
+        #expect(second.outputDuration == 11)
+        #expect(second.sourceTime(at: 3) == 12)
+        #expect(second.nextRetainedSourceTime(after: 5.1) == 12)
+        #expect(second.nextRetainedSourceTime(after: 20) == nil)
+    }
+
     @Test func overlappingCutsDoNotCreateOverlappingOutput() throws {
         let original = try CineoCutList(sourceDuration: 20)
         let a = try original.removingSourceRange(start: 4, end: 8)

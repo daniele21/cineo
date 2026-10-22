@@ -8,10 +8,14 @@ let package = Package(
         .library(name: "CineoAudio", targets: ["CineoAudio"]),
         .executable(name: "cineo-audio-smoke", targets: ["CineoAudioSmoke"])
     ],
-    dependencies: [.package(path: "../CineoMusic")],
+    dependencies: [
+        .package(path: "../CineoMusic"),
+        .package(path: "../CineoProject")
+    ],
     targets: [
         .target(name: "CineoAudio",
-                dependencies: [.product(name: "CineoMusic", package: "CineoMusic")]),
+                dependencies: [.product(name: "CineoMusic", package: "CineoMusic"),
+                    .product(name: "CineoProject", package: "CineoProject")]),
         .executableTarget(name: "CineoAudioSmoke",
                           dependencies: ["CineoAudio",
                             .product(name: "CineoMusic", package: "CineoMusic")])

@@ -71,6 +71,44 @@ public struct CineoCutList: Codable, Equatable, Sendable {
         return nil
     }
 
+    /// Remove [start,end) in the CURRENT edited output timeline. This
+    /// supports consecutive cuts without confusing output/source clocks.
+    public func removingOutputRange(start: Double, end: Double) throws -> CineoCutList {
+        guard start.isFinite, end.isFinite,
+              start >= 0, start < end, end <= outputDuration else {
+            throw CineoCutError.invalidRange
+        }
+        var survivors: [Span] = []
+        var cursor = 0.0
+        for span in retained {
+            let next = cursor + span.duration
+            let removedStart = max(cursor, start)
+            let removedEnd = min(next, end)
+            if removedStart >= removedEnd {
+                survivors.append(span)
+            } else {
+                let before = removedStart - cursor
+                let after = next - removedEnd
+                if before >= Self.minimumSpan {
+                    survivors.append(Span(start: span.start, end: span.start + before))
+                }
+                if after >= Self.minimumSpan {
+                    survivors.append(Span(start: span.end - after, end: span.end))
+                }
+            }
+            cursor = next
+        }
+        guard !survivors.isEmpty else { throw CineoCutError.emptyTimeline }
+        return try CineoCutList(sourceDuration: sourceDuration, retained: survivors)
+    }
+
+    /// Next retained source position when playback reaches a removed region.
+    /// Nil means the edited timeline has ended.
+    public func nextRetainedSourceTime(after sourceSeconds: Double) -> Double? {
+        guard sourceSeconds.isFinite else { return nil }
+        return retained.first(where: { $0.end > sourceSeconds })?.start
+    }
+
     /// Remove [start,end) in SOURCE time; preserve media and all other spans.
     /// This is deliberately NOT allowed to delete the entire recording.
     public func removingSourceRange(start: Double, end: Double) throws -> CineoCutList {
