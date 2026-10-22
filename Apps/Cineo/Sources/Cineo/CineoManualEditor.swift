@@ -732,7 +732,18 @@ final class CineoEditorModel: ObservableObject {
                 // Music changes do not silently start expensive generation.
                 // Keep the existing audio until the user explicitly regenerates it.
                 musicClip = CineoMusicClip(sourceIn: music.sourceIn ?? 0,
-                                           duration: music.clipDuration, loop: music.loop ?? false)
+                                           duration: music.clipDuration, loop: music.loop ?? false,
+                                           crossfade: music.crossfade)
+                if let duck = music.ducking {
+                    musicDucking = CineoDuckingSettings(enabled: duck.enabled,
+                        quietVolume: duck.quietVolume, thresholdDB: duck.thresholdDB,
+                        attack: duck.attack, release: duck.release)
+                }
+                if let cues = music.cues {
+                    musicCues = cues.map { CineoMusicCue(id: $0.id, time: $0.time, label: $0.label) }
+                        .sorted { $0.time < $1.time }
+                }
+                analyzeOriginalAudioForDucking()
                 suggestedBeatAlignment = nil
                 saveMusicSettings()
                 musicStatus = "Istruzioni musicali caricate. Premi Genera per applicarle alla traccia."
@@ -1456,7 +1467,15 @@ private struct CineoInstructionsDialog: View {
                 offset: m.offset, fadeIn: m.fadeIn, fadeOut: m.fadeOut,
                 sourceIn: editor.musicClip.sourceIn,
                 clipDuration: editor.musicClip.duration,
-                loop: editor.musicClip.loop)
+                loop: editor.musicClip.loop,
+                crossfade: editor.musicClip.crossfade,
+                ducking: .init(enabled: editor.musicDucking.enabled,
+                    quietVolume: editor.musicDucking.quietVolume,
+                    thresholdDB: editor.musicDucking.thresholdDB,
+                    attack: editor.musicDucking.attack, release: editor.musicDucking.release),
+                cues: editor.musicCues.map {
+                    .init(id: $0.id, time: $0.time, label: $0.label)
+                })
             root["music"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(instruction))
             let data = try JSONSerialization.data(withJSONObject: root,
                                                   options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
@@ -1507,7 +1526,11 @@ private struct CineoInstructionsDialog: View {
         "bpm": 110, "duration": 45, "keyscale": "C major",
         "seed": -1, "volume": 0.4, "offset": 0,
         "fadeIn": 0.7, "fadeOut": 2.0,
-        "sourceIn": 0, "clipDuration": 20, "loop": false
+        "sourceIn": 0, "clipDuration": 20, "loop": false,
+        "crossfade": 0,
+        "ducking": {"enabled": false, "quietVolume": 0.28,
+                    "thresholdDB": -35, "attack": 0.12, "release": 0.45},
+        "cues": [{"id":"reveal","time":5.5,"label":"Reveal"}]
       }
     }
     """#
