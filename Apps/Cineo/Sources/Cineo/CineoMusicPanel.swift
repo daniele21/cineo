@@ -175,6 +175,11 @@ struct CineoMusicPanel: View {
                 set: { editor.updateDucking(threshold: $0) })
     }
 
+    private var duckModeBinding: Binding<CineoDuckingDetectionMode> {
+        Binding(get: { editor.duckingSettings.detectionMode ?? .anyAudio },
+                set: { editor.updateDucking(mode: $0) })
+    }
+
     private var cueKindBinding: Binding<CineoMusicCueKind> {
         Binding(get: { editor.selectedCueKind },
                 set: { editor.selectedCueKind = $0 })
@@ -380,6 +385,17 @@ struct CineoMusicPanel: View {
             Toggle("Ducking durante l'audio originale", isOn: duckEnabledBinding)
                 .disabled(editor.isExporting)
             if editor.duckingSettings.enabled {
+                HStack(spacing: 10) {
+                    Picker("Quando abbassare", selection: duckModeBinding) {
+                        Text("Qualsiasi audio").tag(CineoDuckingDetectionMode.anyAudio)
+                        Text("Parlato probabile").tag(CineoDuckingDetectionMode.likelySpeech)
+                    }.frame(width: 290)
+                    Spacer()
+                }
+                if editor.duckingSettings.detectionMode == .likelySpeech {
+                    Text("Usa SoundAnalysis integrato in macOS. Non trascrive né invia audio online; il riconoscimento è probabilistico e può confondere alcuni suoni con la voce.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 HStack {
                     Text("Volume musica").frame(width: 105, alignment: .leading)
                     Slider(value: duckLevelBinding, in: 0...1)
@@ -392,7 +408,9 @@ struct CineoMusicPanel: View {
                     Text(String(format: "%.2f", editor.duckingSettings.threshold))
                         .font(.caption.monospacedDigit()).frame(width: 60)
                 }
-                Text("\(editor.musicDuckingRanges.count) intervalli attivi. Analisi di volume, non riconoscimento della voce: anche i suoni di sistema possono attivare il ducking.")
+                Text(editor.duckingSettings.detectionMode == .likelySpeech
+                     ? "\(editor.musicDuckingRanges.count) intervalli di possibile parlato (classificazione locale + RMS)."
+                     : "\(editor.musicDuckingRanges.count) intervalli di attività audio. I suoni di sistema possono attivare il ducking.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             Divider()
