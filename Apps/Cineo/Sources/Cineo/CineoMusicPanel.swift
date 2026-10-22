@@ -67,6 +67,13 @@ struct CineoMusicTimelineStrip: View {
                                 }
                                 context.stroke(accents, with: .color(.orange.opacity(0.85)), lineWidth: 1)
                             }
+                            var cues = Path()
+                            for cue in editor.musicCues {
+                                let x = size.width * CGFloat(cue.at / total)
+                                cues.move(to: CGPoint(x: x, y: 0))
+                                cues.addLine(to: CGPoint(x: x, y: size.height))
+                            }
+                            context.stroke(cues, with: .color(.purple.opacity(0.85)), lineWidth: 2)
                             let playheadX = max(0, min(size.width - 2,
                                 size.width * CGFloat(editor.selectedTime / total)))
                             var playhead = Path()
@@ -118,6 +125,31 @@ struct CineoMusicPanel: View {
 
     private var loopBinding: Binding<Bool> {
         Binding(get: { editor.musicClip.loop }, set: { editor.setMusicLoop($0) })
+    }
+
+    private var crossfadeBinding: Binding<Double> {
+        Binding(get: { editor.musicClip.loopCrossfade },
+                set: { editor.setMusicLoopCrossfade($0) })
+    }
+
+    private var duckEnabledBinding: Binding<Bool> {
+        Binding(get: { editor.duckingSettings.enabled },
+                set: { editor.updateDucking(enabled: $0) })
+    }
+
+    private var duckLevelBinding: Binding<Double> {
+        Binding(get: { editor.duckingSettings.level },
+                set: { editor.updateDucking(level: $0) })
+    }
+
+    private var duckThresholdBinding: Binding<Double> {
+        Binding(get: { editor.duckingSettings.threshold },
+                set: { editor.updateDucking(threshold: $0) })
+    }
+
+    private var cueKindBinding: Binding<CineoMusicCueKind> {
+        Binding(get: { editor.selectedCueKind },
+                set: { editor.selectedCueKind = $0 })
     }
 
     private var maxPlayLength: Double {
@@ -240,6 +272,17 @@ struct CineoMusicPanel: View {
             }
             Toggle("Ripeti la traccia (loop)", isOn: loopBinding)
                 .disabled(editor.isExporting)
+            if editor.musicClip.loop {
+                HStack {
+                    Text("Crossfade loop").frame(width: 105, alignment: .leading)
+                    Slider(value: crossfadeBinding, in: 0...max(0.001,
+                        min(2, (editor.musicActualDuration - editor.musicClip.sourceIn) / 2)))
+                    Text(String(format: "%.2f s", editor.musicClip.loopCrossfade))
+                        .font(.caption.monospacedDigit()).frame(width: 60)
+                }
+                Text("Sovrappone due ripetizioni e sfuma l'una nell'altra (0 = taglio netto).")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             HStack {
                 Text("Volume").frame(width: 105, alignment: .leading)
                 Slider(value: value(\.volume), in: 0...1)
@@ -260,6 +303,53 @@ struct CineoMusicPanel: View {
                     .frame(width: 70)
                 Spacer()
             }.textFieldStyle(.roundedBorder)
+            Divider()
+            Toggle("Ducking durante l'audio originale", isOn: duckEnabledBinding)
+                .disabled(editor.isExporting)
+            if editor.duckingSettings.enabled {
+                HStack {
+                    Text("Volume musica").frame(width: 105, alignment: .leading)
+                    Slider(value: duckLevelBinding, in: 0...1)
+                    Text("\(Int(editor.duckingSettings.level * 100))%")
+                        .font(.caption.monospacedDigit()).frame(width: 60)
+                }
+                HStack {
+                    Text("Soglia attività").frame(width: 105, alignment: .leading)
+                    Slider(value: duckThresholdBinding, in: 0.01...0.5)
+                    Text(String(format: "%.2f", editor.duckingSettings.threshold))
+                        .font(.caption.monospacedDigit()).frame(width: 60)
+                }
+                Text("\(editor.musicDuckingRanges.count) intervalli attivi. Analisi di volume, non riconoscimento della voce: anche i suoni di sistema possono attivare il ducking.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Divider()
+            Text("Cue musicali manuali").font(.headline)
+            HStack {
+                Picker("Tipo", selection: cueKindBinding) {
+                    Text("Hit").tag(CineoMusicCueKind.hit)
+                    Text("Crescendo").tag(CineoMusicCueKind.crescendo)
+                    Text("Transizione").tag(CineoMusicCueKind.transition)
+                }.frame(width: 230)
+                Button("Aggiungi al playhead") { editor.addMusicCue() }
+                    .disabled(editor.musicCues.count >= 100 || editor.isExporting)
+                Spacer()
+            }
+            if !editor.musicCues.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(editor.musicCues) { cue in
+                            Button(String(format: "%@ %.2f s", cue.kind.rawValue, cue.at)) {
+                                editor.scrub(cue.at)
+                            }
+                            Button { editor.removeMusicCue(cue.id) } label: {
+                                Image(systemName: "xmark.circle")
+                            }.help("Elimina cue")
+                        }
+                    }.font(.caption)
+                }
+            }
+            Text("I cue sono marcatori modificabili, non effetti sonori generati automaticamente.")
+                .font(.caption2).foregroundStyle(.secondary)
             Divider()
             HStack {
                 Text("BeatSync").font(.headline)
