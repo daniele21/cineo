@@ -29,6 +29,12 @@ final class CineoEditorModel: ObservableObject {
     @Published var sourcePixelHeight = 982
     @Published var mode: Mode = .manual
     @Published var duration: Double = 0
+    @Published private(set) var sourceDuration: Double = 0
+    @Published private(set) var cutList: CineoCutList?
+    @Published var cutMarkIn: Double = 0
+    @Published var cutMarkOut: Double = 0
+    private var cutUndo: [CineoCutList] = []
+    private var cutRedo: [CineoCutList] = []
     @Published var sourceFrameRate: Double = 30
     @Published var selectedTime: Double = 0
     @Published var zoom: Double = 1
@@ -804,8 +810,23 @@ final class CineoEditorModel: ObservableObject {
             status = "Nessun click registrato. Per Auto Edit, abilita «Registra click» prima della cattura."
             return
         }
+        let editSidecar: CineoPointerSidecar
+        if let cutList {
+            let mapped = pointerSidecar.events.compactMap { event -> CineoPointerEvent? in
+                guard let time = cutList.outputTime(forSourceSeconds: event.sourceSeconds) else { return nil }
+                return CineoPointerEvent(sourceSeconds: time, x: event.x,
+                                         y: event.y, kind: event.kind)
+            }
+            guard let sidecar = try? CineoPointerSidecar(events: mapped) else {
+                status = "Telemetria click non valida dopo i tagli."
+                return
+            }
+            editSidecar = sidecar
+        } else {
+            editSidecar = pointerSidecar
+        }
         let draft = CineoAutoEditPlanner().propose(
-            sidecar: pointerSidecar, duration: duration, preset: autoEditPreset)
+            sidecar: editSidecar, duration: duration, preset: autoEditPreset)
         autoEditShots = draft.shots
         autoEditSelectedIndices = Set(draft.shots.indices)
         autoEditShotCount = draft.shots.count
@@ -893,7 +914,10 @@ final class CineoEditorModel: ObservableObject {
         if let sidecar = pointerSidecar {
             clickHighlightMarkers = sidecar.events.compactMap { e in
                 guard e.kind == .leftClick || e.kind == .rightClick else { return nil }
-                return CineoClickHighlight(time: e.sourceSeconds, x: e.x, y: e.y)
+                let time = cutList?.outputTime(forSourceSeconds: e.sourceSeconds) ?? 
+                    (cutList == nil ? e.sourceSeconds : nil)
+                guard let time else { return nil }
+                return CineoClickHighlight(time: time, x: e.x, y: e.y)
             }
             // Effect is explicitly opt-in; do not turn it on merely because
             // the recording contains click metadata.
@@ -929,19 +953,23 @@ final class CineoEditorModel: ObservableObject {
         autoEditPreviewEnabled = false
         showClickHighlights = false
         clickHighlightMarkers = []
+        cutList = nil
+        cutUndo = []; cutRedo = []
+        cutMarkIn = 0; cutMarkOut = 0
         do {
             var mediaURL = url
             var openedProject: CineoManifest?
             if url.pathExtension.lowercased() == "cineo" {
                 let manifest = try CineoProjectStore().load(from: url)
-                // v0 renderer supports one original untrimmed source only.
-                guard manifest.sources.count == 1, manifest.edits.count == 1,
-                      manifest.edits[0].sourceID == manifest.sources[0].id,
-                      manifest.edits[0].sourceStart == 0,
-                      manifest.edits[0].speed == 1,
-                      abs(manifest.edits[0].sourceEnd - manifest.sources[0].duration) < 0.001
+                // Single original source with any number of ordered, unit-
+                // speed retained ranges is supported. Multiple source files
+                // or retimed clips remain a separate feature.
+                guard manifest.sources.count == 1, !manifest.edits.isEmpty,
+                      manifest.edits.allSatisfy({
+                          $0.sourceID == manifest.sources[0].id && $0.speed == 1
+                      })
                 else {
-                    status = "Questo progetto usa tagli o clip multiple non ancora supportati da Studio."
+                    status = "Progetto multiclip o con velocità variabile non ancora supportato."
                     return
                 }
                 mediaURL = url.appendingPathComponent(manifest.sources[0].relativePath)
@@ -960,7 +988,15 @@ final class CineoEditorModel: ObservableObject {
                 status = "Formato video non ancora supportato dall'editor Core Image."
                 return
             }
+            sourceDuration = t.seconds
             duration = t.seconds
+            if let openedProject {
+                cutList = try CineoCutList(
+                    sourceDuration: sourceDuration,
+                    retained: openedProject.edits.map {
+                        .init(start: $0.sourceStart, end: $0.sourceEnd)
+                    })
+            }
             let fps = Double((try? await track.load(.nominalFrameRate)) ?? 30)
             sourceFrameRate = fps.isFinite && fps > 1 && fps <= 240 ? fps : 30
             let generator = AVAssetImageGenerator(asset: asset)
@@ -994,6 +1030,19 @@ final class CineoEditorModel: ObservableObject {
             title = openedProject?.title ?? url.lastPathComponent
             sourceURL = mediaURL
             projectURL = openedProject == nil ? nil : url
+            if projectURL == nil, let cutsURL = cutPlanURL,
+               FileManager.default.fileExists(atPath: cutsURL.path) {
+                let candidate = try JSONDecoder().decode(
+                    CineoCutList.self, from: Data(contentsOf: cutsURL))
+                try candidate.validate()
+                guard abs(candidate.sourceDuration - sourceDuration) < 0.04 else {
+                    throw CineoCutError.invalidPlan
+                }
+                cutList = candidate
+            }
+            duration = cutList?.outputDuration ?? sourceDuration
+            cutMarkIn = 0
+            cutMarkOut = duration
             restorePlan()
             loadPointerEvents(for: url, source: mediaURL,
                               project: openedProject == nil ? nil : url)
@@ -1022,18 +1071,25 @@ final class CineoEditorModel: ObservableObject {
         }
         let location = projects.appendingPathComponent(UUID().uuidString + ".cineo", isDirectory: true)
         let width = sourcePixelWidth, height = sourcePixelHeight
-        let length = duration, name = title
+        let length = sourceDuration, name = title
         isSavingProject = true
         status = "Copio il video nel progetto Cineo senza modificare l'originale…"
         Task {
             do {
-                let manifest = try await Task.detached(priority: .userInitiated) {
+                var manifest = try await Task.detached(priority: .userInitiated) {
                     try CineoRecordingImporter().createProject(
                         from: source, at: location,
                         width: width, height: height,
                         durationSeconds: length, title: name
                     )
                 }.value
+                if let cutList {
+                    manifest.edits = cutList.retained.map {
+                        SourceEdit(sourceID: manifest.sources[0].id,
+                                   sourceStart: $0.start, sourceEnd: $0.end)
+                    }
+                    try CineoProjectStore().save(manifest, in: location)
+                }
                 let savedSource = location.appendingPathComponent(manifest.sources[0].relativePath)
                 if let originalMusic = musicURL, let musicAsset {
                     let copied = location.appendingPathComponent("Media").appendingPathComponent(musicAsset.fileName)
@@ -1174,6 +1230,8 @@ final class CineoEditorModel: ObservableObject {
         hasPointerEvents = false
         showClickHighlights = false
         clickHighlightMarkers = []
+        cutList = nil
+        cutUndo = []; cutRedo = []
         discardAutoEditProposal()
         status = ""
     }
@@ -1329,6 +1387,107 @@ final class CineoEditorModel: ObservableObject {
         refreshPreview()
     }
 
+    private var cutPlanURL: URL? {
+        guard let planURL else { return nil }
+        return planURL.deletingPathExtension().appendingPathExtension("cuts.json")
+    }
+
+    private func persistCutList(_ cuts: CineoCutList) throws {
+        try cuts.validate()
+        if let projectURL {
+            var manifest = try CineoProjectStore().load(from: projectURL)
+            guard manifest.sources.count == 1 else { throw CineoCutError.invalidPlan }
+            manifest.edits = cuts.retained.map {
+                SourceEdit(sourceID: manifest.sources[0].id,
+                           sourceStart: $0.start, sourceEnd: $0.end)
+            }
+            try CineoProjectStore().save(manifest, in: projectURL)
+        } else if let target = cutPlanURL {
+            try FileManager.default.createDirectory(
+                at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(cuts).write(to: target, options: .atomic)
+        } else {
+            throw CineoCutError.invalidPlan
+        }
+    }
+
+    private func useCutList(_ cuts: CineoCutList) {
+        cutList = cuts
+        duration = cuts.outputDuration
+        selectedTime = min(selectedTime, max(0, duration - 0.05))
+        cutMarkIn = 0
+        cutMarkOut = duration
+        // Rebuild only source-attached markers; camera/music edits are blocked
+        // while cutting and authored afterwards in the edited output clock.
+        if let sidecar = pointerSidecar {
+            clickHighlightMarkers = sidecar.events.compactMap { e in
+                guard e.kind == .leftClick || e.kind == .rightClick,
+                      let time = cuts.outputTime(forSourceSeconds: e.sourceSeconds) else { return nil }
+                return CineoClickHighlight(time: time, x: e.x, y: e.y)
+            }
+        }
+        discardAutoEditProposal()
+        musicSettings.duration = max(10, min(600, duration))
+        refreshPreview()
+    }
+
+    func removeMarkedInterval() {
+        guard sourceURL != nil, !isExporting, !isSavingProject,
+              keyframes.isEmpty, musicAsset == nil, musicCues.isEmpty else {
+            status = "Esegui i tagli prima degli zoom e della musica: i loro tempi non vengono alterati automaticamente."
+            return
+        }
+        do {
+            let old = try cutList ?? CineoCutList(sourceDuration: sourceDuration)
+            let next = try old.removingOutputRange(start: cutMarkIn, end: cutMarkOut)
+            pausePreviewPlayback()
+            try persistCutList(next)
+            cutUndo.append(old)
+            if cutUndo.count > 50 { cutUndo.removeFirst() }
+            cutRedo = []
+            useCutList(next)
+            status = String(format: "Taglio applicato senza modificare la sorgente. Durata: %.1f s.", duration)
+        } catch {
+            status = "Taglio non applicato: \(error.localizedDescription)"
+        }
+    }
+
+    func undoCut() {
+        guard keyframes.isEmpty, musicAsset == nil, musicCues.isEmpty else {
+            status = "Annulla gli zoom e la musica prima di modificare i tagli."
+            return
+        }
+        guard let previous = cutUndo.last else { return }
+        do {
+            try persistCutList(previous)
+            let current = try cutList ?? CineoCutList(sourceDuration: sourceDuration)
+            cutRedo.append(current)
+            cutUndo.removeLast()
+            useCutList(previous)
+            status = "Ultimo taglio annullato."
+        } catch {
+            status = "Undo taglio non riuscito: \(error.localizedDescription)"
+        }
+    }
+
+    func redoCut() {
+        guard keyframes.isEmpty, musicAsset == nil, musicCues.isEmpty else {
+            status = "Annulla gli zoom e la musica prima di modificare i tagli."
+            return
+        }
+        guard let next = cutRedo.last else { return }
+        do {
+            try persistCutList(next)
+            let current = try cutList ?? CineoCutList(sourceDuration: sourceDuration)
+            cutUndo.append(current)
+            cutRedo.removeLast()
+            useCutList(next)
+            status = "Taglio ripristinato."
+        } catch {
+            status = "Redo taglio non riuscito: \(error.localizedDescription)"
+        }
+    }
+
     private var planURL: URL? {
         if let projectURL { return projectURL.appendingPathComponent("scene.json") }
         guard let sourceURL else { return nil }
@@ -1391,6 +1550,7 @@ final class CineoEditorModel: ObservableObject {
         previewRequest = request
         let plan = currentPlan
         let seconds = selectedTime
+        let sourceSeconds = cutList?.sourceTime(at: seconds) ?? seconds
         loadingPreview = true
         previewTask = Task {
             // A short coalescing window avoids decoding every intermediate
@@ -1399,7 +1559,7 @@ final class CineoEditorModel: ObservableObject {
             guard !Task.isCancelled else { return }
             do {
                 let cgImage = try generator.copyCGImage(
-                    at: CMTime(seconds: seconds, preferredTimescale: 600), actualTime: nil
+                    at: CMTime(seconds: sourceSeconds, preferredTimescale: 600), actualTime: nil
                 )
                 guard !Task.isCancelled, request == previewRequest else { return }
                 let composited = try CineoSceneFrameRenderer.compose(
@@ -1436,7 +1596,8 @@ final class CineoEditorModel: ObservableObject {
         }
         previewTask?.cancel()
         previewRequest = UUID()
-        let time = CMTime(seconds: selectedTime, preferredTimescale: 600)
+        let sourceSeconds = cutList?.sourceTime(at: selectedTime) ?? selectedTime
+        let time = CMTime(seconds: sourceSeconds, preferredTimescale: 600)
         player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
         displayedFrameCount = 0
         previewActualFPS = 0
@@ -1466,8 +1627,23 @@ final class CineoEditorModel: ObservableObject {
         guard isPreviewPlaying, let player = previewPlayer,
               let output = previewFrameOutput else { return }
         let timestamp = player.currentTime()
-        let seconds = timestamp.seconds
-        guard seconds.isFinite, seconds >= 0 else { return }
+        let sourceSeconds = timestamp.seconds
+        guard sourceSeconds.isFinite, sourceSeconds >= 0 else { return }
+        let seconds: Double
+        if let cuts = cutList {
+            guard let mapped = cuts.outputTime(forSourceSeconds: sourceSeconds) else {
+                if let next = cuts.retained.first(where: { $0.start > sourceSeconds }) {
+                    player.seek(to: CMTime(seconds: next.start, preferredTimescale: 600))
+                } else {
+                    pausePreviewPlayback()
+                    selectedTime = max(0, duration - 0.06)
+                }
+                return
+            }
+            seconds = mapped
+        } else {
+            seconds = sourceSeconds
+        }
         if seconds >= duration - 0.06 {
             pausePreviewPlayback()
             selectedTime = max(0, duration - 0.06)
@@ -1519,6 +1695,7 @@ final class CineoEditorModel: ObservableObject {
         guard let url = sourceURL, !isExporting else { return }
         pausePreviewPlayback()
         let plan = currentPlan
+        let exportCuts = cutList
         // Freeze the music plan at export start; UI changes must not alter a
         // render already in progress.
         let exportMusicURL = musicURL
@@ -1556,7 +1733,7 @@ final class CineoEditorModel: ObservableObject {
                 let videoOnly = folder.appendingPathComponent("." + UUID().uuidString + "-silent.mp4")
                 defer { try? FileManager.default.removeItem(at: videoOnly) }
                 try await CineoSceneExporter().export(
-                    source: url, destination: videoOnly, plan: plan
+                    source: url, destination: videoOnly, plan: plan, cuts: exportCuts
                 ) { [weak self] progress in
                     Task { @MainActor [weak self] in self?.exportProgress = progress * 0.85 }
                 }
@@ -1583,6 +1760,14 @@ final class CineoEditorModel: ObservableObject {
                         resolvedDuckingRanges = activity
                     }
                 }
+                if let exportCuts {
+                    resolvedDuckingRanges = resolvedDuckingRanges.flatMap { range in
+                        exportCuts.outputRanges(
+                            overlappingSourceStart: range.start,
+                            end: range.end
+                        ).map { CineoAudioActivityRange(start: $0.start, end: $0.end) }
+                    }
+                }
                 if exportMusicURL != nil || hasOriginalAudio || !exportCueSounds.isEmpty {
                     status = "Composizione audio/video e applicazione fade…"
                     try await CineoAudioMuxer.mux(
@@ -1591,7 +1776,8 @@ final class CineoEditorModel: ObservableObject {
                         settings: exportMusicURL == nil ? nil : exportMusicSettings,
                         clip: exportMusicClip,
                         ducking: exportDucking, duckingRanges: resolvedDuckingRanges,
-                        cueSounds: exportCueSounds, destination: dest)
+                        cueSounds: exportCueSounds, cuts: exportCuts,
+                        destination: dest)
                 } else {
                     try FileManager.default.moveItem(at: videoOnly, to: dest)
                 }
@@ -1755,6 +1941,25 @@ struct CineoManualEditorView: View {
                         .disabled(editor.sourceURL == nil)
                     }
                     CineoMusicTimelineStrip(editor: editor)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Tagli non distruttivi · prima di zoom e musica")
+                            .font(.caption.weight(.semibold))
+                        HStack(spacing: 7) {
+                            Button("Inizio") { editor.cutMarkIn = editor.selectedTime }
+                            Text(String(format: "%.1f s", editor.cutMarkIn))
+                                .font(.caption.monospacedDigit())
+                            Button("Fine") { editor.cutMarkOut = editor.selectedTime }
+                            Text(String(format: "%.1f s", editor.cutMarkOut))
+                                .font(.caption.monospacedDigit())
+                            Button("Rimuovi intervallo") { editor.removeMarkedInterval() }
+                                .disabled(editor.sourceURL == nil || editor.isExporting ||
+                                          !editor.keyframes.isEmpty || editor.musicAsset != nil ||
+                                          editor.cutMarkOut <= editor.cutMarkIn)
+                            Button("Undo") { editor.undoCut() }
+                            Button("Redo") { editor.redoCut() }
+                        }
+                        .font(.caption)
+                    }
                     if editor.isPreviewPlaying {
                         Text("Anteprima: \(editor.previewActualFPS) fps visualizzati · qualità proxy")
                             .font(.caption.monospacedDigit())

@@ -33,7 +33,10 @@ public enum CineoAudioMuxer {
         let narrationAsset = AVURLAsset(url: original)
         if let cuts {
             try cuts.validate()
-            guard abs(cuts.outputDuration - duration.seconds) < 0.35 else {
+            let originalDuration = try await narrationAsset.load(.duration)
+            guard originalDuration.isNumeric,
+                  abs(cuts.sourceDuration - originalDuration.seconds) < 0.05,
+                  abs(cuts.outputDuration - duration.seconds) < 0.35 else {
                 throw CineoMusicError.invalid("La timeline dei tagli non coincide con il video.")
             }
         }
@@ -246,7 +249,10 @@ public enum CineoAudioMuxer {
         defer { try? FileManager.default.removeItem(at: temporary) }
         try await exporter.export(to: temporary, as: .mp4)
         let verified = AVURLAsset(url: temporary)
-        guard !(try await verified.loadTracks(withMediaType: .audio)).isEmpty,
+        let actualDuration = try await verified.load(.duration)
+        guard actualDuration.isNumeric,
+              abs(actualDuration.seconds - duration.seconds) < 0.20,
+              !(try await verified.loadTracks(withMediaType: .audio)).isEmpty,
               !(try await verified.loadTracks(withMediaType: .video)).isEmpty else {
             throw CineoMusicError.invalid("MP4 esportato senza video o audio.")
         }

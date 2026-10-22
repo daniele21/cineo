@@ -18,6 +18,7 @@ let package = Package(
                     .product(name: "CineoProject", package: "CineoProject")]),
         .executableTarget(name: "CineoAudioSmoke",
                           dependencies: ["CineoAudio",
-                            .product(name: "CineoMusic", package: "CineoMusic")])
+                            .product(name: "CineoMusic", package: "CineoMusic"),
+                            .product(name: "CineoProject", package: "CineoProject")])
     ]
 )

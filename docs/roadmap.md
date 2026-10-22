@@ -44,6 +44,16 @@ Smart Camera test. **Video cut UI/export remain gated** until video, native
 audio, click telemetry and manual camera edits use the exact same output-time
 mapping; do not confuse an editable time model with a shipped trim feature.
 
+## Native cut-aware timeline developer candidate (2026-10-22)
+
+A staged implementation now connects cut-list model, source-retimed native
+renderer and original-audio mux to the Cineo Studio editor. Users can mark
+and remove an interval, undo/redo, reopen cut projects and work on the
+shorter output timeline. **Cuts are restricted to the pre-camera/pre-music
+phase** until later retiming-aware editing is implemented. This is still
+a developer candidate requiring CI/native-media + final physical Mac E2E
+before any merge to `main`. Full specifics: [cut QA](v1-cut-editor-qa.md).
+
 ## Planning rules
 
 - Each milestone is a **vertical outcome** with a demo and measurable exit criteria, not a bucket of classes.

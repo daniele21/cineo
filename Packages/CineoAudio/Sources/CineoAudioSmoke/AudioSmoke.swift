@@ -4,6 +4,7 @@ import CoreVideo
 import AudioToolbox
 import CineoAudio
 import CineoMusic
+import CineoProject
 
 @main
 struct CineoAudioSmoke {
@@ -62,6 +63,23 @@ struct CineoAudioSmoke {
                 "Original narration lost: mixed %.4f vs ducked %.4f", mixed, reduced))
         }
         print(String(format: "[audio-smoke] PASS: original audio retained (RMS %.4f)", mixed))
+        // A deleted source interval must remove narration from the same
+        // original timestamps, without cutting the wrong section in AAC.
+        let cutVideo = folder.appendingPathComponent("shortened-video.mp4")
+        let cutMix = folder.appendingPathComponent("shortened-audio.mp4")
+        let cuts = try CineoCutList(sourceDuration: 3.6)
+            .removingOutputRange(start: 1.2, end: 2.4)
+        try await makeVideo(url: cutVideo, frameCount: 48)
+        try await CineoAudioMuxer.mux(
+            video: cutVideo, original: voice, music: nil, settings: nil,
+            cuts: cuts, destination: cutMix)
+        try await verifyMedia(url: cutMix, expectedDuration: 2.4)
+        let unexpectedVoice = try await rms(url: cutMix, start: 1.45, end: 1.9)
+        guard unexpectedVoice < 0.005 else {
+            throw SmokeError.failed(String(format:
+                "Removed speech survived output-time cut: RMS %.4f", unexpectedVoice))
+        }
+        print("[audio-smoke] PASS: cut removes original speech interval while keeping edited AAC/H264 clock")
         print("[audio-smoke] PASS: real AVFoundation/H264/AAC mux, loop and ducking")
     }
 
@@ -69,7 +87,7 @@ struct CineoAudioSmoke {
         case failed(String)
     }
 
-    static func makeVideo(url: URL) async throws {
+    static func makeVideo(url: URL, frameCount: Int = 72) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
@@ -92,7 +110,7 @@ struct CineoAudioSmoke {
         guard let pool = adaptor.pixelBufferPool else {
             throw SmokeError.failed("Missing video pixel buffer pool")
         }
-        for frame in 0..<72 {
+        for frame in 0..<frameCount {
             while !input.isReadyForMoreMediaData {
                 try await Task.sleep(for: .milliseconds(10))
             }
@@ -152,13 +170,13 @@ struct CineoAudioSmoke {
         try wav.write(to: url, options: .atomic)
     }
 
-    static func verifyMedia(url: URL) async throws {
+    static func verifyMedia(url: URL, expectedDuration: Double = 3.6) async throws {
         let asset = AVURLAsset(url: url)
         let video = try await asset.loadTracks(withMediaType: .video)
         let audio = try await asset.loadTracks(withMediaType: .audio)
         let length = try await asset.load(.duration)
         guard !video.isEmpty, !audio.isEmpty,
-              abs(length.seconds - 3.6) < 0.15 else {
+              abs(length.seconds - expectedDuration) < 0.15 else {
             throw SmokeError.failed("Missing H264, AAC or 3.6s duration in exported MP4")
         }
     }

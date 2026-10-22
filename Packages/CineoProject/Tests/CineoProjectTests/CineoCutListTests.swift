@@ -36,6 +36,14 @@ struct CineoCutListTests {
         #expect(second.nextRetainedSourceTime(after: 20) == nil)
     }
 
+    @Test func originalAudioActivityIsSplitAndRetimedByCuts() throws {
+        let cuts = try CineoCutList(sourceDuration: 20)
+            .removingOutputRange(start: 6, end: 12)
+        #expect(cuts.outputRanges(overlappingSourceStart: 5, end: 14) ==
+                [.init(start: 5, end: 6), .init(start: 6, end: 8)])
+        #expect(cuts.outputRanges(overlappingSourceStart: 7, end: 10).isEmpty)
+    }
+
     @Test func overlappingCutsDoNotCreateOverlappingOutput() throws {
         let original = try CineoCutList(sourceDuration: 20)
         let a = try original.removingSourceRange(start: 4, end: 8)
