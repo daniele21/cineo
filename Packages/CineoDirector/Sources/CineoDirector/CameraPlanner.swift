@@ -113,7 +113,13 @@ public struct CameraPlanner: Sendable {
                 continue
             }
             let intendedStart = max(0, first.time - config.leadTime)
-            let start = max(intendedStart, (shots.last?.end ?? -config.minimumGapBetweenShots) + config.minimumGapBetweenShots)
+            // Explicit user/result anchors deserve a shorter but still
+            // readable wide gap. This prevents dropping a genuine result
+            // solely because the previous click's hold ended recently.
+            let wideGap = reason == .result
+                ? min(config.minimumGapBetweenShots, 0.25)
+                : config.minimumGapBetweenShots
+            let start = max(intendedStart, (shots.last?.end ?? -wideGap) + wideGap)
             // Never move a zoom to *after* the user's last relevant action.
             // In dense workflows the required wide gap may consume the
             // remaining time; skipping is better than showing a late and

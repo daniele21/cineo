@@ -8,16 +8,21 @@ public struct CineoScenePlan: Codable, Sendable, Equatable {
     public var paddingFraction: Double
     public var background: CineoRGB
     public var camera: [CineoCameraKeyframe]
+    /// Optional click pulses, nil for all pre-effect Cineo projects.
+    /// Explicitly not a duplicated mouse pointer. Renderer shares preview/export.
+    public var clickHighlights: [CineoClickHighlight]?
 
     public init(outputWidth: Int, outputHeight: Int,
                 paddingFraction: Double = 0.065,
                 background: CineoRGB = .init(red: 0.08, green: 0.10, blue: 0.16),
-                camera: [CineoCameraKeyframe] = []) {
+                camera: [CineoCameraKeyframe] = [],
+                clickHighlights: [CineoClickHighlight]? = nil) {
         self.outputWidth = outputWidth
         self.outputHeight = outputHeight
         self.paddingFraction = paddingFraction
         self.background = background
         self.camera = camera
+        self.clickHighlights = clickHighlights
     }
 
     public func validate() throws {
@@ -25,8 +30,18 @@ public struct CineoScenePlan: Codable, Sendable, Equatable {
               (2...8192).contains(outputHeight), outputHeight % 2 == 0,
               paddingFraction.isFinite, (0..<0.40).contains(paddingFraction),
               background.isValid,
-              camera.count <= 100_000
+              camera.count <= 100_000,
+              (clickHighlights?.count ?? 0) <= 20_000
         else { throw CineoSceneError.invalidPlan }
+        if let clickHighlights {
+            var previous = -Double.infinity
+            for marker in clickHighlights {
+                guard marker.isValid, marker.time >= previous else {
+                    throw CineoSceneError.invalidPlan
+                }
+                previous = marker.time
+            }
+        }
         var last = -Double.infinity
         for k in camera {
             guard k.time.isFinite, k.time >= 0, k.time > last,
@@ -81,6 +96,19 @@ public struct CineoScenePlan: Codable, Sendable, Equatable {
             before = after
         }
         return first
+    }
+}
+
+public struct CineoClickHighlight: Codable, Sendable, Equatable {
+    public let time: Double
+    public let x: Double
+    public let y: Double
+    public init(time: Double, x: Double, y: Double) {
+        self.time = time; self.x = x; self.y = y
+    }
+    public var isValid: Bool {
+        time.isFinite && time >= 0 && x.isFinite && y.isFinite &&
+        (0...1).contains(x) && (0...1).contains(y)
     }
 }
 

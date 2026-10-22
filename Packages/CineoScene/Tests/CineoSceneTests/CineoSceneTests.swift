@@ -35,6 +35,27 @@ struct CineoSceneTests {
         #expect(abs(zoom.cropWidth - 1 / 1.8) < 1e-9)
     }
 
+    @Test func optionalClickEffectsRoundTripAndLegacyDecode() throws {
+        let plan = CineoScenePlan(outputWidth: 1920, outputHeight: 1080,
+            clickHighlights: [.init(time: 1.25, x: 0.03, y: 0.98)])
+        try plan.validate()
+        let bytes = try JSONEncoder().encode(plan)
+        #expect(try JSONDecoder().decode(CineoScenePlan.self, from: bytes) == plan)
+        // Pre-effect projects omit clickHighlights entirely and must still
+        // decode, without unexpectedly turning the effect on.
+        var legacy = try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
+        legacy.removeValue(forKey: "clickHighlights")
+        let oldBytes = try JSONSerialization.data(withJSONObject: legacy)
+        let restored = try JSONDecoder().decode(CineoScenePlan.self, from: oldBytes)
+        #expect(restored.clickHighlights == nil)
+    }
+
+    @Test func invalidClickCoordinatesCannotEnterScene() {
+        let plan = CineoScenePlan(outputWidth: 1920, outputHeight: 1080,
+            clickHighlights: [.init(time: .nan, x: 0.5, y: 0.5)])
+        #expect(throws: CineoSceneError.invalidPlan) { try plan.validate() }
+    }
+
     @Test func invalidPlanRejected() {
         let bad = CineoScenePlan(outputWidth: 1919, outputHeight: 1080)
         #expect(throws: CineoSceneError.invalidPlan) {

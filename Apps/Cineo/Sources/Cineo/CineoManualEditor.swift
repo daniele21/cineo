@@ -37,6 +37,8 @@ final class CineoEditorModel: ObservableObject {
     @Published var padding: Double = 0.06
     @Published var portrait = false
     @Published var style = "Dark"
+    @Published private(set) var showClickHighlights = false
+    private var clickHighlightMarkers: [CineoClickHighlight] = []
     @Published var preview: NSImage?
     @Published var status = "Apri una registrazione per iniziare."
     @Published var loadingPreview = false
@@ -769,14 +771,32 @@ final class CineoEditorModel: ObservableObject {
         let color: CineoRGB = switch style {
         case "Light": .init(red: 0.91, green: 0.93, blue: 0.97)
         case "Black": .init(red: 0.015, green: 0.017, blue: 0.025)
+        case "Cineo Ocean": .init(red: 11 / 255, green: 79 / 255, blue: 106 / 255)
+        case "Cineo Frost": .init(red: 221 / 255, green: 246 / 255, blue: 240 / 255)
         default: .init(red: 0.09, green: 0.12, blue: 0.19)
         }
         return CineoScenePlan(
             outputWidth: outputWidth, outputHeight: outputHeight,
             paddingFraction: padding, background: color,
             camera: (autoEditPreviewEnabled && !autoEditCamera.isEmpty ? autoEditCamera : keyframes)
-                .sorted { $0.time < $1.time }
+                .sorted { $0.time < $1.time },
+            clickHighlights: showClickHighlights ? clickHighlightMarkers : nil
         )
+    }
+
+    func setClickHighlights(_ enabled: Bool) {
+        guard sourceURL != nil, !isExporting else { return }
+        pausePreviewPlayback()
+        let before = showClickHighlights
+        showClickHighlights = enabled
+        guard savePlan() else {
+            showClickHighlights = before
+            return
+        }
+        status = enabled
+            ? "Feedback click attivato: anelli discreti sincronizzati nell'anteprima e nell'export."
+            : "Feedback click disattivato. Il cursore originale resta invariato."
+        refreshPreview()
     }
 
     func proposeAutoEdit() {
@@ -870,6 +890,14 @@ final class CineoEditorModel: ObservableObject {
             pointerSidecar = try? CineoPointerRecordingStore().load(for: original)
         }
         hasPointerEvents = !(pointerSidecar?.events.isEmpty ?? true)
+        if let sidecar = pointerSidecar {
+            clickHighlightMarkers = sidecar.events.compactMap { e in
+                guard e.kind == .leftClick || e.kind == .rightClick else { return nil }
+                return CineoClickHighlight(time: e.sourceSeconds, x: e.x, y: e.y)
+            }
+            // Effect is explicitly opt-in; do not turn it on merely because
+            // the recording contains click metadata.
+        }
         autoEditCamera = []
         autoEditShots = []
         autoEditSelectedIndices = []
@@ -899,6 +927,8 @@ final class CineoEditorModel: ObservableObject {
         pointerSidecar = nil
         hasPointerEvents = false
         autoEditPreviewEnabled = false
+        showClickHighlights = false
+        clickHighlightMarkers = []
         do {
             var mediaURL = url
             var openedProject: CineoManifest?
@@ -1142,6 +1172,8 @@ final class CineoEditorModel: ObservableObject {
         projectURL = nil
         pointerSidecar = nil
         hasPointerEvents = false
+        showClickHighlights = false
+        clickHighlightMarkers = []
         discardAutoEditProposal()
         status = ""
     }
@@ -1334,9 +1366,22 @@ final class CineoEditorModel: ObservableObject {
         keyframes = plan.camera
         portrait = plan.outputHeight > plan.outputWidth
         padding = plan.paddingFraction
-        if plan.background.red < 0.04 { style = "Black" }
-        else if plan.background.red > 0.5 { style = "Light" }
-        else { style = "Dark" }
+        let color = plan.background
+        if abs(color.red - 11.0 / 255) < 0.001 &&
+            abs(color.green - 79.0 / 255) < 0.001 {
+            style = "Cineo Ocean"
+        } else if abs(color.red - 221.0 / 255) < 0.001 &&
+                  abs(color.green - 246.0 / 255) < 0.001 {
+            style = "Cineo Frost"
+        } else if color.red < 0.04 {
+            style = "Black"
+        } else if color.red > 0.5 {
+            style = "Light"
+        } else {
+            style = "Dark"
+        }
+        clickHighlightMarkers = plan.clickHighlights ?? []
+        showClickHighlights = plan.clickHighlights != nil
     }
 
     func refreshPreview() {
@@ -1773,10 +1818,19 @@ struct CineoManualEditorView: View {
                         get: { editor.style },
                         set: { editor.style = $0; editor.updateStyle() }
                     )) {
-                        ForEach(["Dark", "Black", "Light"], id: \.self) { name in
+                        ForEach(["Dark", "Black", "Light", "Cineo Ocean", "Cineo Frost"], id: \.self) { name in
                             Text(name).tag(name)
                         }
                     }
+                    Text("Cineo Ocean e Frost riprendono la palette ufficiale del brand kit.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Toggle("Evidenzia click", isOn: Binding(
+                        get: { editor.showClickHighlights },
+                        set: { editor.setClickHighlights($0) }
+                    ))
+                    .disabled(editor.sourceURL == nil || editor.isExporting ||
+                              (!editor.hasPointerEvents && !editor.showClickHighlights))
+                    .help("Anelli leggeri sui click. Non aggiunge un secondo cursore.")
                     Toggle("Formato verticale 9:16", isOn: Binding(
                         get: { editor.portrait },
                         set: { editor.portrait = $0; editor.updateStyle() }
