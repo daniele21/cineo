@@ -27,7 +27,7 @@ When generic inherited contracts conflict with product-specific requirements, pr
 
 ## Upstream reuse and licenses
 
-- **Default native application:** `Apps/Cineo`, built with SwiftPM and Apple Command Line Tools (no Xcode.app) using `scripts/test-cineo.sh --native|--interactive`. ScreenCaptureKit Capture Alpha only; real TCC/MP4 tests pending.
+- **Default native application:** `Apps/Cineo`, built with SwiftPM and Apple Command Line Tools (no Xcode.app) using `scripts/test-cineo.sh --native|--interactive`. **Interactive builds install exactly one `~/Applications/Cineo Dev.app`** with bundle ID `com.daniele21.cineo.capturealpha.dev`; the launcher registers that specific path with LaunchServices. Never create second dev app identities per worktree or stage `.app` bundles under `~/Applications` (Screen Recording permission restarts might reopen old copies). Developer builds use a pinned certificate-backed signing identity in the login Keychain; ad-hoc signing is CI-only. ScreenCaptureKit Capture Alpha only; real TCC/MP4 tests pending.
 - **Legacy editor reference:** diip3sh/orbit at pinned SHA `219c4c8ad9965229aa84271c5201b1b8ad26eb7a`, per `docs/decisions/0001-native-foundation.md`. Its Xcode build and Smart Zooms editor remain behind explicit `--legacy-orbit-*` commands until ported. Do not represent them as features of `Apps/Cineo`.
 - Other evaluation references: jsattler/BetterCapture, jasonzh0/CineScreen, getopenscreen/openscreen.
 - Do not copy ArcShot or AGPL-derived source just because it is readable; read exact source license/dependencies/asset notices and evaluate distribution consequences.
@@ -44,7 +44,7 @@ When generic inherited contracts conflict with product-specific requirements, pr
 
 ## Current gate: P1, with P2/P3 independent package spikes
 
-1. Verify SwiftPM `Apps/Cineo` builds with `DEVELOPER_DIR=/Library/Developer/CommandLineTools` and an ad-hoc `.app` is created. The old Orbit staging is a separate compatibility suite.
+1. Verify SwiftPM `Apps/Cineo` builds with `DEVELOPER_DIR=/Library/Developer/CommandLineTools` and uses certificate-based persistent signing locally. CI may build an ad-hoc `.app` and separately exercises the stable designated requirement using an ephemeral signing identity; the old Orbit staging is a separate compatibility suite.
 2. On a real Mac run `scripts/test-cineo.sh --interactive`; confirm TCC approval and a playable MP4. Do not claim audio, editor, or Smart Zooms for this Capture Alpha; those remain migration tasks #39.
 3. Independently improve pure Swift `CineoDirector` and `CineoProject` logic with tests; do not claim these are wired into the native app.
 4. Keep inherited template validation marked as legacy engineering checks rather than app-level E2E.

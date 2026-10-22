@@ -11,6 +11,9 @@ on:
       - 'Packages/CineoProject/**'
       - 'Packages/CineoEditPlanner/**'
       - 'scripts/build-cineo-clt.sh'
+      - 'scripts/ensure-cineo-signing.sh'
+      - 'scripts/test-cineo-signing-policy.sh'
+      - 'scripts/verify-cineo-persistent-signing.sh'
       - '.github/workflows/clt-native-cineo.yml'
   push:
     branches: [main]
@@ -23,6 +26,9 @@ on:
       - 'Packages/CineoProject/**'
       - 'Packages/CineoEditPlanner/**'
       - 'scripts/build-cineo-clt.sh'
+      - 'scripts/ensure-cineo-signing.sh'
+      - 'scripts/test-cineo-signing-policy.sh'
+      - 'scripts/verify-cineo-persistent-signing.sh'
       - '.github/workflows/clt-native-cineo.yml'
   workflow_dispatch:
 
@@ -36,6 +42,7 @@ jobs:
     timeout-minutes: 30
     env:
       DEVELOPER_DIR: /Library/Developer/CommandLineTools
+      CINEO_SIGNING_MODE: adhoc
     steps:
       - uses: actions/checkout@v4
       - name: Verify real CLT environment
@@ -45,19 +52,36 @@ jobs:
           xcrun --sdk macosx --show-sdk-path
           swift --version
           bash -n scripts/build-cineo-clt.sh
+          bash -n scripts/ensure-cineo-signing.sh
+          bash -n scripts/test-cineo-signing-policy.sh
+          bash -n scripts/verify-cineo-persistent-signing.sh
           bash -n scripts/swift-test-clt.sh
           bash -n scripts/test-cineo.sh
           bash scripts/test-cineo.sh --preflight
+      # Exercise stable certificate pinning and no-rotation rules with an
+      # isolated fake security CLI. GitHub-hosted runners must NOT configure
+      # trust for self-signed certificates: security add-trusted-cert can hang
+      # on an unattended macOS Keychain prompt until the job is cancelled.
+      - name: Verify persistent-signing policy without Keychain trust writes
+        run: |
+          bash scripts/test-cineo-signing-policy.sh
       - name: Compile and package real screen recorder
         env:
           CINEO_CLT_BUILD_ROOT: ${{ runner.temp }}/cineo-capture
+          CINEO_CLT_STAGE_HOME: ${{ runner.temp }}/cineo-capture-staging
         run: |
           set -euo pipefail
           bash scripts/test-cineo.sh --native
-          test -x "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/MacOS/Cineo"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CINEO_CLT_BUILD_ROOT/Cineo.app/Contents/Info.plist")" = com.daniele21.cineo.capturealpha
-          codesign --verify --strict "$CINEO_CLT_BUILD_ROOT/Cineo.app"
-          echo "Native Cineo app packaged under standalone CLT."
+          app="$CINEO_CLT_BUILD_ROOT/Cineo Dev.app"
+          test -x "$app/Contents/MacOS/Cineo"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = com.daniele21.cineo.capturealpha.dev
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$app/Contents/Info.plist")" = "Cineo Dev"
+          codesign --verify --strict "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CineoSourceCommit' "$app/Contents/Info.plist")" = "$(git rev-parse --short=12 HEAD)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CineoCaptureImplementation' "$app/Contents/Info.plist")" = "stream-stop-v2"
+          test -z "$(find "$CINEO_CLT_STAGE_HOME" -type d -name '*.app' -print -quit)"
+          test ! -e "$CINEO_CLT_BUILD_ROOT/Cineo Dev.stage.app"
+          echo "Native Cineo Dev app packaged with one stable bundle identity under standalone CLT."
 
   clt-core-smoke:
     name: Core algorithm smoke without Swift Testing macros (CLT only)

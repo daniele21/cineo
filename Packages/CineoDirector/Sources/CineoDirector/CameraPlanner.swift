@@ -114,7 +114,11 @@ public struct CameraPlanner: Sendable {
             }
             let intendedStart = max(0, first.time - config.leadTime)
             let start = max(intendedStart, (shots.last?.end ?? -config.minimumGapBetweenShots) + config.minimumGapBetweenShots)
-            guard start < duration else { continue }
+            // Never move a zoom to *after* the user's last relevant action.
+            // In dense workflows the required wide gap may consume the
+            // remaining time; skipping is better than showing a late and
+            // misleading focus on an interaction that's already finished.
+            guard start < duration, start <= last.time + 0.05 else { continue }
             let end = min(duration, max(start + config.minimumShotLength, last.time + config.holdTime))
             guard end > start, end - start >= min(config.minimumShotLength, duration) else { continue }
 

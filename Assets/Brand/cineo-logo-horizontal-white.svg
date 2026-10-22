@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 280" width="1000" height="280"><g transform="translate(36 17) scale(.37)"><defs>
+      <linearGradient id="top" x1=".06" y1="1" x2="1" y2="0"><stop stop-color="#48BFD2"/><stop offset=".45" stop-color="#79DACE"/><stop offset="1" stop-color="#B7F0C7"/></linearGradient>
+      <linearGradient id="left" x1=".1" y1=".05" x2=".8" y2="1"><stop stop-color="#135773"/><stop offset=".53" stop-color="#177D9E"/><stop offset="1" stop-color="#44D0CE"/></linearGradient>
+      <linearGradient id="bottom" x1=".0" y1="1" x2="1" y2=".05"><stop stop-color="#092E49"/><stop offset=".50" stop-color="#0B5170"/><stop offset="1" stop-color="#157B96"/></linearGradient>
+      <linearGradient id="right" x1="0" y1=".97" x2="1" y2="0"><stop stop-color="#1599B0"/><stop offset=".56" stop-color="#48CEC8"/><stop offset="1" stop-color="#96E9BC"/></linearGradient>
+      <linearGradient id="shine" x1="0" y1="0" x2="1" y2=".8"><stop stop-color="#FFFFFF" stop-opacity=".50"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient>
+      <linearGradient id="disc" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#F9FFFF"/></linearGradient>
+    </defs>
+    
+    <!-- shadow underlay uses no SVG filters, preserving compatibility in Figma / web -->
+    <g fill="#092E49" opacity=".10">
+      <rect x="190" y="65" width="270" height="247" rx="40"/>
+      <rect x="194" y="358" width="269" height="253" rx="42"/>
+      <rect x="54" y="201" width="252" height="275" rx="41"/>
+      <rect x="354" y="201" width="242" height="276" rx="40"/>
+    </g>
+    <!-- top frame -->
+    <rect x="186" y="58" width="270" height="247" rx="40" fill="url(#top)" stroke="#F0FFF6" stroke-opacity=".82" stroke-width="2.1"/>
+    <path d="M219 59 H420" fill="none" stroke="#FFFFFF" stroke-opacity=".30" stroke-width="2"/>
+    <!-- lower frame -->
+    <rect x="187" y="351" width="269" height="253" rx="42" fill="url(#bottom)" stroke="#062F46" stroke-opacity=".4" stroke-width="1.8"/>
+    <!-- left frame -->
+    <rect x="49" y="193" width="252" height="275" rx="41" fill="url(#left)" stroke="#064663" stroke-opacity=".65" stroke-width="2"/>
+    <path d="M50 425 V427 Q50 468 91 468 H260" fill="none" stroke="#86FFF0" stroke-opacity=".78" stroke-width="2.4"/>
+    <!-- right frame -->
+    <rect x="348" y="193" width="242" height="276" rx="40" fill="url(#right)" stroke="#B8FFE4" stroke-opacity=".85" stroke-width="2.3"/>
+    <path d="M361 227 Q367 201 390 201 H543 Q581 201 581 239 V426" fill="none" stroke="#DAFFF3" stroke-opacity=".53" stroke-width="3"/>
+    <path d="M378 204 H535 Q573 204 576 241" fill="none" stroke="#FFFFFF" stroke-opacity=".27" stroke-width="1.6"/>
+    <!-- center cursor disc -->
+    <circle cx="326" cy="331" r="105" fill="#0B4F6A" opacity=".15"/>
+    <circle cx="323" cy="324" r="104" fill="url(#disc)" stroke="#E3F2F1" stroke-opacity=".95" stroke-width="1.1"/>
+    <path d="M282 273 L373 328 L339 336 L363 359 L348 374 L325 348 L312 376 Z" fill="#0A4B67"/>
+    </g><text x="310" y="180" font-family="Inter, Arial, sans-serif" font-weight="750" font-size="133" letter-spacing="-7" fill="#FFFFFF">Cineo</text></svg>

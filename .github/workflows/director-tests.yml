@@ -25,3 +25,23 @@ jobs:
         uses: actions/checkout@v4
       - name: Run pure Swift tests
         run: swift test --package-path Packages/CineoDirector
+
+  camera-benchmark:
+    name: Deterministic zoom quality fixtures
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.2
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Generate structural quality report
+        run: |
+          swift run --package-path Packages/CineoDirector cineo-camera-benchmark > camera-benchmark.json
+          cat camera-benchmark.json
+      - name: Publish synthetic fixture metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: cineo-camera-quality-fixtures
+          path: camera-benchmark.json
+          retention-days: 14

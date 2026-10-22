@@ -1,0 +1,25 @@
+/* Cineo brand tokens · v1.0 · palette recreated from approved visual reference */
+:root {
+  --cineo-ink: #092D43;
+  --cineo-deep-ocean: #0B4F6A;
+  --cineo-ocean: #107C99;
+  --cineo-lagoon: #29BED1;
+  --cineo-turquoise: #55D2C8;
+  --cineo-mint: #98EACD;
+  --cineo-frost: #DDF6F0;
+  --cineo-mist: #A4CDD0;
+  --cineo-cloud: #F5FAF9;
+  --cineo-white: #FFFFFF;
+  --cineo-muted: #5B7180;
+  --cineo-outline: #B8D9DA;
+  --cineo-navy: #102639;
+  --cineo-font-display: "Inter Display", Inter, system-ui, sans-serif;
+  --cineo-font-body: Inter, system-ui, sans-serif;
+  --cineo-gradient-ocean: linear-gradient(135deg, #0B4F6A 0%, #107C99 55%, #29BED1 100%);
+  --cineo-gradient-fresh: linear-gradient(135deg, #55D2C8 0%, #98EACD 100%);
+  --cineo-radius-control: 12px;
+  --cineo-radius-card: 20px;
+  --cineo-motion-base: 220ms;
+  --cineo-shadow-card: 0 16px 40px rgba(9,45,67,.12);
+}
+@media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
