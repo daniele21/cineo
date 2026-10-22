@@ -251,16 +251,22 @@ struct CineoInstructionDocumentTests {
                   "sourceIn":2.5,"clipDuration":13.5,"loop":true,
                   "loopCrossfade":0.25,
                   "duckingEnabled":true,"duckingLevel":0.2,"duckingThreshold":0.08,
-                  "cues":[{"id":"feature","at":6.2,"kind":"hit","label":"Reveal"}]}}
+                  "duckingMode":"likelySpeech",
+                  "cues":[{"id":"feature","at":6.2,"kind":"hit","label":"Reveal",
+                           "soundEnabled":true,"soundVolume":0.35}]}}
         """
         let document = try CineoInstructionDocument.decode(Data(json.utf8))
         #expect(document.music?.loopCrossfade == 0.25)
         #expect(document.music?.duckingEnabled == true)
         #expect(document.music?.duckingLevel == 0.2)
         #expect(document.music?.cues?.first?.kind == "hit")
+        #expect(document.music?.duckingMode == "likelySpeech")
+        #expect(document.music?.cues?.first?.soundEnabled == true)
+        #expect(document.music?.cues?.first?.soundVolume == 0.35)
         let stored = try JSONEncoder().encode(document)
         let decoded = try CineoInstructionDocument.decode(stored)
         #expect(decoded.music?.cues?.first?.label == "Reveal")
+        #expect(decoded.music?.cues?.first?.soundEnabled == true)
         #expect(try decoded.compile(duration: 40, over: base) == base)
     }
 
