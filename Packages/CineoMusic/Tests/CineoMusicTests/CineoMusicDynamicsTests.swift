@@ -43,6 +43,31 @@ final class CineoMusicDynamicsTests: XCTestCase {
         XCTAssertEqual(points.last?.gain ?? -1, 1, accuracy: 0.01)
     }
 
+    func testCrossfadeTwoLaneTimingAndFadeInOut() throws {
+        let clip = CineoMusicClip(sourceIn: 2, duration: 15, loop: true, crossfade: 1)
+        let parts = try clip.arrangedSegments(sourceDuration: 8, videoDuration: 22, offset: 3)
+        XCTAssertEqual(parts.map(\.timelineStart), [3, 8, 13])
+        XCTAssertEqual(parts.map(\.lane), [0, 1, 0])
+        XCTAssertEqual(parts.map(\.duration), [6, 6, 5])
+        XCTAssertEqual(parts[0].fadeOut, 1)
+        XCTAssertEqual(parts[1].fadeIn, 1)
+        XCTAssertEqual(parts[1].fadeOut, 1)
+        XCTAssertEqual(parts[2].fadeOut, 0)
+        let atSeam = clip.sources(at: 8.5, sourceDuration: 8, videoDuration: 22, offset: 3)
+        XCTAssertEqual(atSeam.count, 2)
+        XCTAssertEqual(atSeam.map(\.gain).reduce(0,+), 1, accuracy: 0.01)
+        XCTAssertThrowsError(try CineoMusicClip(loop: true, crossfade: 4)
+           .arrangedSegments(sourceDuration: 8, videoDuration: 22, offset: 3))
+    }
+
+    func testOldClipJSONDecodesWithoutCrossfadeField() throws {
+        let decoded = try JSONDecoder().decode(CineoMusicClip.self,
+            from: Data(#"{"sourceIn":0,"duration":12,"loop":true}"#.utf8))
+        XCTAssertNil(decoded.crossfade)
+        XCTAssertEqual(try decoded.arrangedSegments(sourceDuration: 5,
+                videoDuration: 15, offset: 0).count, 3)
+    }
+
     func testCueAndSettingsRejectInvalidValues() {
         XCTAssertNoThrow(try CineoMusicCue(time: 2).validate(videoDuration: 3))
         XCTAssertThrowsError(try CineoMusicCue(time: 3).validate(videoDuration: 3))
