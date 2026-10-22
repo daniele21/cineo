@@ -353,6 +353,25 @@ final class CineoEditorModel: ObservableObject {
         musicStatus = "Cue aggiunto a \(String(format: "%.2f", time)) s. Nessuno zoom cambiato."
     }
 
+    func renameMusicCue(_ id: String, label: String) {
+        guard !isExporting, let index = musicCues.firstIndex(where: { $0.id == id }) else { return }
+        let cleaned = String(label.prefix(60))
+        musicCues[index].label = cleaned
+        // Allow temporary empty text while editing; persist only nonempty.
+        if !cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            saveMusicSettings()
+        }
+    }
+
+    func moveMusicCue(_ id: String, to seconds: Double) {
+        guard !isExporting, duration > 0,
+              let index = musicCues.firstIndex(where: { $0.id == id }) else { return }
+        musicCues[index].time = min(max(0, seconds), max(0, duration - 0.01))
+        musicCues.sort { $0.time < $1.time }
+        suggestedBeatAlignment = nil
+        saveMusicSettings()
+    }
+
     func removeMusicCue(_ id: String) {
         guard !isExporting else { return }
         musicCues.removeAll { $0.id == id }
