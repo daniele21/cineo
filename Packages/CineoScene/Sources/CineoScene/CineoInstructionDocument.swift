@@ -36,13 +36,47 @@ public struct CineoInstructionDocument: Codable, Sendable {
         public let sourceIn: Double?
         public let clipDuration: Double?
         public let loop: Bool?
+        public let crossfade: Double?
+        public let ducking: Ducking?
+        public let cues: [Cue]?
+
+        public struct Ducking: Codable, Sendable {
+            public let enabled: Bool
+            public let quietVolume: Double
+            public let thresholdDB: Double
+            public let attack: Double
+            public let release: Double
+
+            public init(enabled: Bool = false, quietVolume: Double = 0.28,
+                        thresholdDB: Double = -35, attack: Double = 0.12,
+                        release: Double = 0.45) {
+                self.enabled = enabled
+                self.quietVolume = quietVolume
+                self.thresholdDB = thresholdDB
+                self.attack = attack
+                self.release = release
+            }
+        }
+
+        public struct Cue: Codable, Sendable {
+            public let id: String
+            public let time: Double
+            public let label: String
+
+            public init(id: String, time: Double, label: String) {
+                self.id = id
+                self.time = time
+                self.label = label
+            }
+        }
 
         public init(type: String = "music.generate", caption: String, bpm: Int,
                     duration: Double, keyscale: String, seed: Int64 = -1,
                     volume: Double = 0.4, offset: Double = 0,
                     fadeIn: Double = 0.6, fadeOut: Double = 1.5,
                     sourceIn: Double? = nil, clipDuration: Double? = nil,
-                    loop: Bool? = nil) {
+                    loop: Bool? = nil, crossfade: Double? = nil,
+                    ducking: Ducking? = nil, cues: [Cue]? = nil) {
             self.type = type
             self.caption = caption
             self.bpm = bpm
@@ -56,6 +90,9 @@ public struct CineoInstructionDocument: Codable, Sendable {
             self.sourceIn = sourceIn
             self.clipDuration = clipDuration
             self.loop = loop
+            self.crossfade = crossfade
+            self.ducking = ducking
+            self.cues = cues
         }
 
         public func validate(videoDuration: Double) throws {
@@ -72,9 +109,32 @@ public struct CineoInstructionDocument: Codable, Sendable {
                   fadeIn.isFinite, (0...duration).contains(fadeIn),
                   fadeOut.isFinite, (0...duration).contains(fadeOut),
                   sourceIn == nil || (sourceIn!.isFinite && sourceIn! >= 0),
-                  clipDuration == nil || (clipDuration!.isFinite && clipDuration! >= 0.04)
+                  clipDuration == nil || (clipDuration!.isFinite && clipDuration! >= 0.04),
+                  crossfade == nil || (crossfade!.isFinite && (0...1.5).contains(crossfade!))
                   else {
                 throw CineoInstructionError.invalid("music: valori mancanti o fuori intervallo.")
+            }
+            if let ducking {
+                guard ducking.quietVolume.isFinite, (0...1).contains(ducking.quietVolume),
+                      ducking.thresholdDB.isFinite, (-80 ... -5).contains(ducking.thresholdDB),
+                      ducking.attack.isFinite, (0.01...2).contains(ducking.attack),
+                      ducking.release.isFinite, (0.02...5).contains(ducking.release) else {
+                    throw CineoInstructionError.invalid("music.ducking: parametri fuori intervallo.")
+                }
+            }
+            if let cues {
+                guard cues.count <= 128 else {
+                    throw CineoInstructionError.invalid("music.cues: massimo 128 cue.")
+                }
+                var ids = Set<String>()
+                for cue in cues {
+                    guard !cue.id.isEmpty, cue.id.count <= 100,
+                          ids.insert(cue.id).inserted,
+                          !cue.label.isEmpty, cue.label.count <= 60,
+                          cue.time.isFinite, (0..<videoDuration).contains(cue.time) else {
+                        throw CineoInstructionError.invalid("music.cues: cue duplicato o non valido.")
+                    }
+                }
             }
         }
     }
@@ -160,7 +220,24 @@ public struct CineoInstructionDocument: Codable, Sendable {
             }
             try fields(music, allowed: ["type", "caption", "bpm", "duration", "keyscale",
                                        "seed", "volume", "offset", "fadeIn", "fadeOut",
-                                       "sourceIn", "clipDuration", "loop"], at: "music")
+                                       "sourceIn", "clipDuration", "loop",
+                                       "crossfade", "ducking", "cues"], at: "music")
+            if let ducking = music["ducking"] {
+                guard let dictionary = ducking as? [String: Any] else {
+                    throw CineoInstructionError.invalid("music.ducking deve essere un oggetto.")
+                }
+                try fields(dictionary, allowed: ["enabled", "quietVolume",
+                             "thresholdDB", "attack", "release"], at: "music.ducking")
+            }
+            if let cues = music["cues"] {
+                guard let items = cues as? [[String: Any]], items.count <= 128 else {
+                    throw CineoInstructionError.invalid("music.cues deve essere un array di max 128 elementi.")
+                }
+                for (index, cue) in items.enumerated() {
+                    try fields(cue, allowed: ["id", "time", "label"],
+                               at: "music.cues[\(index)]")
+                }
+            }
         }
         if let raw = root["stage"] {
             guard let stage = raw as? [String: Any] else {
