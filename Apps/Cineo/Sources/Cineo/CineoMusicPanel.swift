@@ -347,6 +347,36 @@ struct CineoMusicPanel: View {
                 Spacer()
             }.textFieldStyle(.roundedBorder)
             Divider()
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Rigenerazione parziale ACE-Step").font(.headline)
+                Text("Seleziona un intervallo del video: Cineo lo traduce nella sorgente musicale. Il modello modifica solo quella regione, lasciando intatta la traccia originale.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text("Da")
+                    TextField("s", value: $editor.repaintStart,
+                              format: .number.precision(.fractionLength(0...2)))
+                        .frame(width: 66)
+                    Button("Playhead") { editor.markRepaintStart() }
+                    Text("a")
+                    TextField("s", value: $editor.repaintEnd,
+                              format: .number.precision(.fractionLength(0...2)))
+                        .frame(width: 66)
+                    Button("Playhead") { editor.markRepaintEnd() }
+                    Spacer()
+                }.textFieldStyle(.roundedBorder).controlSize(.small)
+                HStack(spacing: 10) {
+                    Button("Rigenera solo l'intervallo") {
+                        editor.repaintMusicSelection()
+                    }
+                    .disabled(editor.isGeneratingMusic || editor.isExporting
+                        || editor.musicURL == nil)
+                    Text("WAV / MP3 · senza LM · nessun file sovrascritto")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Text("I loop e i crossfade non possono essere attraversati dalla selezione; usa un intervallo continuo di almeno 1 secondo.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Divider()
             Toggle("Ducking durante l'audio originale", isOn: duckEnabledBinding)
                 .disabled(editor.isExporting)
             if editor.duckingSettings.enabled {
