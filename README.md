@@ -2,13 +2,13 @@
 
 **Record naturally. Present beautifully.**
 
-Cineo is a **planned native, local-first macOS application** for creating cinematic software demos from real screen recordings.
+Cineo is a **native, local-first macOS application in active development** for creating cinematic software demos from real screen recordings.
 
 The goal: record a workflow, get a polished first edit with purposeful zooms and cursor motion, refine the details only when necessary, then export a clear product video for a website, launch post, presentation or tutorial.
 
-> **Project status — native CLT-only Capture Alpha + experimental Orbit editor (October 2026).**
+> **Project status — integrated Studio + Music Director development candidate (October 22, 2026).**
 >
-> `Apps/Cineo` is an independent SwiftPM/SwiftUI macOS screen recorder that compiles using **Apple Command Line Tools without Xcode.app**. It saves local H.264 MP4 captures and has not yet been validated with live TCC capture on a physical Mac. The larger Orbit-based editor/Smart Zooms integration currently remains a separate Xcode-dependent legacy path; it is **not** included in the CLT Capture Alpha. Cineo is not a released product.
+> `Apps/Cineo` is a native SwiftPM/SwiftUI application built using **Apple Command Line Tools without Xcode.app**. It includes live edited preview, camera keyframes, H.264 export, an optional local ACE-Step Music Director and a durable music-job queue. The supervised ACE-Step lifecycle passed its macOS CI and a local user smoke. The stacked [lifecycle PR #66](https://github.com/daniele21/cineo/pull/66) and [Smart Camera/audio PR #67](https://github.com/daniele21/cineo/pull/67) have **not** been merged to `main`. Opt-in click recording and automatic zoom proposals are currently development candidates requiring physical-Mac verification; this is not a distributed release.
 
 ## The experience we want
 
@@ -52,7 +52,7 @@ We intentionally will **not** introduce multiple parallel compositor/timeline im
 
 ## Try Cineo without Xcode.app
 
-The default test runner now uses SwiftPM plus **Apple Command Line Tools** only. No Xcode.app or Apple Developer Team is needed for the Capture Alpha.
+The default test runner uses SwiftPM and **Apple Command Line Tools**. No Xcode.app or Apple Developer Team is needed for local development.
 
 ```bash
 bash scripts/test-cineo.sh --preflight
@@ -61,16 +61,16 @@ bash scripts/test-cineo.sh --native
 bash scripts/test-cineo.sh --interactive
 ```
 
-The interactive command opens the local recorder; you can capture your main display and save MP4 files under `~/Movies/Cineo/`. Real permission handling and video playback still require a physical Mac smoke test. **This alpha does not yet include the Orbit editor, automatic zooms or audio.**
+The interactive command builds and opens Cineo Studio with its built-in recorder, local editor, composited Play/Pausa preview, export and optional Music Director. The PR #67 capture controls can record system/microphone audio and opt-in click metadata (both off by default). Suggested click zooms must be previewed and applied explicitly; no source MP4 is overwritten. The editor/export and combined A/V output still require final real-video verification on an Apple Silicon Mac.
 
 See [Xcode-free Mac testing](docs/testing/local-test-runner.md), [SwiftPM capture source](Apps/Cineo) and [the build decision](docs/decisions/0002-xcode-free-build.md).
 
-## Next step: finish CLT-first P1
+## Next steps: integrated CLT Studio
 
-1. Verify the real `Cineo.app` created by `scripts/build-cineo-clt.sh` launches and produces a playable H.264 MP4 from ScreenCaptureKit on an Apple Silicon Mac.
-2. Migrate audio selection and cursor input telemetry to the SwiftPM app.
-3. Port one cohesive editor/compositor/timebase from the pinned Orbit reference, then connect CineoProject and CineoDirector. Avoid importing a competing renderer.
-4. Confirm 16:9/9:16 edits and export through real video evidence. Keep the legacy Xcode path as a temporary reference, never the required local build.
+1. Stabilize and integrate the stacked PR #44 → #56 → #57–#66 and the new Smart Camera/audio PR #67; CI plus real-Mac smoke are gates, not proof of released quality.
+2. Verify opt-in click PTS alignment and Smart Camera proposals against a real 30/60-second demonstration, preserving manual overrides.
+3. Verify system audio/microphone permissions and recorded stream sync, followed by separate polish of timeline/UX.
+4. Run the end-to-end perceptual capture → Auto Edit → Music Director → 16:9/9:16 export only after the upstream unit/CI work is stable.
 
 See [the roadmap](docs/roadmap.md) for task IDs, delivery phases, acceptance criteria and stop conditions.
 

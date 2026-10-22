@@ -1,8 +1,25 @@
 # Cineo — Development roadmap and implementation plan
 
-**Status:** proposed plan; execution has not begun.  
-**As of:** 2026-10-19.  
+**Status:** active implementation; baseline is a stack of unmerged feature branches, not a released app.  
+**As of:** 2026-10-22.  
 **North star:** first-class macOS capture → intelligent local Auto Edit → user-controlled refinement → publishable export.
+
+## Active delivery snapshot (2026-10-22)
+
+The new CLT-first integrated Studio has already gained real frame-based Play/Pausa preview, manual camera controls, music generation with durable queued jobs, and an ACE-Step supervisor. The lifecycle commit `d65f9e0a` has green macOS CI; the developer reports that it works on the Mac. These changes live in PR #66 stacked on #65 and earlier branches, **not in main**.
+
+Parallel active work in [PR #67](https://github.com/daniele21/cineo/pull/67):
+- **Camera:** deterministic, click-only zoom proposals from the existing CineoDirector planner, previewed before explicit apply, with no silent manual-keyframe overwrites.
+- **Capture:** opt-in mouse click sidecar (first ScreenCaptureKit frame host time), optional system audio and microphone (off by default), no text/keystroke recording.
+- **Integration:** preserve recorded click metadata across save as `.cineo` and reopen; one CineoScene renderer for preview and export.
+
+### Next delivery gates
+
+1. **Integration baseline:** green CLT build/music/events/director/scene/QA checks; resolve stacked PR ancestry and duplicate audio-polish proposals, without blind cherry-picks.
+2. **Smart Camera quality:** actual click PTS and display normalization, zoom compositional quality, 30/60-second samples, explicit overrides, project reopening.
+3. **Audio capture and Studio:** permission-denied behavior, system/microphone recording, A/V drift, frame/audio preview parity, cue/ducking handling.
+4. **Final physical-Mac E2E:** capture → auto proposal → manual refine → music generation → 16:9 and 9:16 export, visual review and headphone listening. This is intentionally deferred until the earlier gates pass.
+5. **Distribution:** license audit, Developer ID signing/notarization, compatibility and rollback after product gates.
 
 ## Planning rules
 
