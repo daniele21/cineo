@@ -125,6 +125,18 @@ struct CameraPlannerTests {
         #expect(shots.count == 1)
     }
 
+    @Test func explicitResultAnchorRetainsReadabilityGap() {
+        let events = [
+            AttentionEvent(time: 1, x: 0.3, y: 0.3, kind: .click),
+            AttentionEvent(time: 2.5, x: 0.3, y: 0.3, kind: .result)
+        ]
+        let shots = CameraPlanner().suggest(events: events, duration: 15)
+        #expect(shots.count == 2)
+        #expect(shots[1].reason == .result)
+        #expect(shots[1].start >= shots[0].end + 0.2)
+        #expect(shots[1].start <= 2.5)
+    }
+
     @Test func explicitResultAnchorSurvivesDuplicateSuppression() {
         let events = [
             AttentionEvent(time: 1, x: 0.3, y: 0.3, kind: .click),
