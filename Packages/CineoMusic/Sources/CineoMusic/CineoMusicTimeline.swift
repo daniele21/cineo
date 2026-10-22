@@ -6,11 +6,15 @@ public struct CineoMusicClip: Codable, Equatable, Sendable {
     public var sourceIn: Double
     public var duration: Double?
     public var loop: Bool
+    /// Optional for backward compatibility with older music.json project files.
+    public var crossfade: Double?
 
-    public init(sourceIn: Double = 0, duration: Double? = nil, loop: Bool = false) {
+    public init(sourceIn: Double = 0, duration: Double? = nil, loop: Bool = false,
+                crossfade: Double? = nil) {
         self.sourceIn = sourceIn
         self.duration = duration
         self.loop = loop
+        self.crossfade = crossfade
     }
 
     public func validate(sourceDuration: Double, videoDuration: Double, offset: Double) throws {
@@ -18,7 +22,9 @@ public struct CineoMusicClip: Codable, Equatable, Sendable {
               videoDuration.isFinite, videoDuration > 0,
               offset.isFinite, offset >= 0, offset < videoDuration,
               sourceIn.isFinite, sourceIn >= 0, sourceIn < sourceDuration - 0.02,
-              duration == nil || (duration!.isFinite && duration! >= 0.04)
+              duration == nil || (duration!.isFinite && duration! >= 0.04),
+              crossfade == nil || (crossfade!.isFinite && crossfade! >= 0 &&
+                                    crossfade! <= 1.5 && crossfade! < (sourceDuration - sourceIn) * 0.45)
         else { throw CineoMusicError.invalid("Taglio musicale: durata, posizione o sorgente non valida.") }
     }
 
@@ -51,6 +57,57 @@ public struct CineoMusicClip: Codable, Equatable, Sendable {
         return segments
     }
 
+    /// Non-destructive arrangement with optional overlapping two-lane loops.
+    /// When crossfade=0, this is equivalent to segments() with no overlaps.
+    public func arrangedSegments(sourceDuration: Double, videoDuration: Double,
+                                 offset: Double) throws -> [CineoMusicArrangedSegment] {
+        try validate(sourceDuration: sourceDuration, videoDuration: videoDuration, offset: offset)
+        let total = effectiveDuration(sourceDuration: sourceDuration,
+                                      videoDuration: videoDuration, offset: offset)
+        guard total >= 0.04 else { return [] }
+        let span = sourceDuration - sourceIn
+        let fade = loop ? (crossfade ?? 0) : 0
+        let step = span - fade
+        var arranged: [CineoMusicArrangedSegment] = []
+        var relativeStart = 0.0
+        while relativeStart < total - 0.000001 {
+            guard arranged.count < 4096 else {
+                throw CineoMusicError.invalid("Troppi cicli musicali: massimo 4096.")
+            }
+            let length = min(span, total - relativeStart)
+            let nextStart = relativeStart + step
+            let actualFadeOut = loop && fade > 0 && nextStart < relativeStart + length - 0.000001
+                ? (relativeStart + length - nextStart) : 0
+            let fadeIn = arranged.isEmpty ? 0 : min(fade, length)
+            arranged.append(.init(sourceStart: sourceIn, timelineStart: offset + relativeStart,
+                                  duration: length, lane: arranged.count % 2,
+                                  fadeIn: fadeIn, fadeOut: actualFadeOut))
+            if !loop { break }
+            relativeStart += step
+        }
+        return arranged
+    }
+
+    /// At most two active source positions when adjacent loop cycles overlap.
+    /// Each lane carries its own linear gain, for exact AVPlayer/AVAudioMix reuse.
+    public func sources(at videoTime: Double, sourceDuration: Double,
+                        videoDuration: Double, offset: Double) -> [CineoMusicPlaybackSource] {
+        guard let segments = try? arrangedSegments(sourceDuration: sourceDuration,
+                                                   videoDuration: videoDuration, offset: offset) else {
+            return []
+        }
+        return segments.compactMap { part in
+            let elapsed = videoTime - part.timelineStart
+            guard elapsed >= 0 && elapsed < part.duration else { return nil }
+            let gainIn = part.fadeIn > 0 ? min(1, elapsed / part.fadeIn) : 1
+            let gainOut = part.fadeOut > 0 ?
+                min(1, (part.duration - elapsed) / part.fadeOut) : 1
+            return CineoMusicPlaybackSource(lane: part.lane,
+                sourceTime: part.sourceStart + elapsed,
+                gain: max(0, min(1, gainIn * gainOut)))
+        }
+    }
+
     /// Video-clock -> source clock, returned only while this edit is audible.
     public func playbackPosition(videoTime: Double, sourceDuration: Double,
                                  videoDuration: Double, offset: Double) -> Double? {
@@ -66,6 +123,21 @@ public struct CineoMusicSegment: Equatable, Sendable {
     public let sourceStart: Double
     public let timelineStart: Double
     public let duration: Double
+}
+
+public struct CineoMusicArrangedSegment: Equatable, Sendable {
+    public let sourceStart: Double
+    public let timelineStart: Double
+    public let duration: Double
+    public let lane: Int
+    public let fadeIn: Double
+    public let fadeOut: Double
+}
+
+public struct CineoMusicPlaybackSource: Equatable, Sendable {
+    public let lane: Int
+    public let sourceTime: Double
+    public let gain: Double
 }
 
 /// A proposed, explicitly confirmable edit. Never mutates camera state.
