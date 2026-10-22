@@ -93,8 +93,15 @@ final class CineoMusicJobQueue: ObservableObject {
             }
         }
         jobs.insert(job, at: 0)
-        try FileManager.default.createDirectory(at: outputs, withIntermediateDirectories: true)
-        try saveOrThrow()
+        do {
+            try FileManager.default.createDirectory(at: outputs, withIntermediateDirectories: true)
+            try saveOrThrow()
+        } catch {
+            // A failed enqueue must not look queued when it never reached
+            // durable storage.
+            jobs.removeAll { $0.id == id }
+            throw error
+        }
         pump()
     }
 
