@@ -1,0 +1,26 @@
+[
+  {"id":"no-clicks","duration":25,"preset":"balanced","events":[],"minShots":0,"maxShots":0},
+  {"id":"navigation-cluster","duration":30,"preset":"balanced","events":[
+    {"sourceSeconds":3,"x":0.3,"y":0.3,"kind":"leftClick"},
+    {"sourceSeconds":3.3,"x":0.32,"y":0.29,"kind":"leftClick"},
+    {"sourceSeconds":12,"x":0.7,"y":0.65,"kind":"leftClick"}],"minShots":2,"maxShots":2},
+  {"id":"repeated-click-suppression","duration":30,"preset":"subtle","events":[
+    {"sourceSeconds":2,"x":0.3,"y":0.5,"kind":"leftClick"},
+    {"sourceSeconds":3.5,"x":0.3,"y":0.5,"kind":"leftClick"}],"minShots":1,"maxShots":1},
+  {"id":"dense-interactions","duration":60,"preset":"balanced","events":[
+    {"sourceSeconds":2,"x":0.1,"y":0.1,"kind":"leftClick"},
+    {"sourceSeconds":5,"x":0.9,"y":0.9,"kind":"leftClick"},
+    {"sourceSeconds":8,"x":0.1,"y":0.9,"kind":"leftClick"},
+    {"sourceSeconds":11,"x":0.9,"y":0.1,"kind":"leftClick"},
+    {"sourceSeconds":14,"x":0.2,"y":0.2,"kind":"leftClick"},
+    {"sourceSeconds":17,"x":0.8,"y":0.8,"kind":"leftClick"},
+    {"sourceSeconds":20,"x":0.2,"y":0.8,"kind":"leftClick"},
+    {"sourceSeconds":23,"x":0.8,"y":0.2,"kind":"leftClick"},
+    {"sourceSeconds":26,"x":0.3,"y":0.3,"kind":"leftClick"},
+    {"sourceSeconds":29,"x":0.7,"y":0.7,"kind":"leftClick"}],"minShots":8,"maxShots":10},
+  {"id":"corner-clicks","duration":20,"preset":"dynamic","events":[
+    {"sourceSeconds":2,"x":0.01,"y":0.01,"kind":"leftClick"},
+    {"sourceSeconds":6,"x":0.99,"y":0.99,"kind":"rightClick"},
+    {"sourceSeconds":10,"x":0.01,"y":0.99,"kind":"leftClick"},
+    {"sourceSeconds":14,"x":0.99,"y":0.01,"kind":"leftClick"}],"minShots":4,"maxShots":4}
+]
