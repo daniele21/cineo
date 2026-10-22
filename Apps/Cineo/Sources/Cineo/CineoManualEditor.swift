@@ -47,6 +47,8 @@ final class CineoEditorModel: ObservableObject {
     @Published private(set) var importedActionMarkers: [ImportedActionMarker] = []
     @Published var showingInstructions = false
     @Published var showingMusic = false
+    // Backend lifecycle belongs to Cineo, never to a specific .cineo project.
+    let aceBackend = CineoACEBackendController()
     @Published var musicSettings = CineoMusicSettings()
     @Published var musicAsset: CineoMusicAsset?
     @Published var musicDisplayName = ""
@@ -82,6 +84,8 @@ final class CineoEditorModel: ObservableObject {
     private var originalAudioAnalysisTask: Task<Void, Never>?
     private var musicAnalysisTask: Task<Void, Never>?
     private var musicDragInitialOffset: Double?
+    private var musicDragSnapshot: CineoMusicDragSnapshot?
+    private var musicDragHandle: CineoMusicDragHandle?
 
     private struct StoredMusic: Codable {
         let settings: CineoMusicSettings
@@ -370,13 +374,65 @@ final class CineoEditorModel: ObservableObject {
         refreshMusicPreviewPosition()
     }
 
+    func dragMusicClip(deltaX: Double, startX: Double, timelineWidth: Double) {
+        guard musicAsset != nil, !isExporting, timelineWidth > 0,
+              deltaX.isFinite, startX.isFinite else { return }
+        if musicDragSnapshot == nil {
+            let snapshot = CineoMusicDragSnapshot(
+                offset: musicSettings.offset, clip: musicClip,
+                sourceDuration: effectiveSourceDuration, videoDuration: duration)
+            musicDragHandle = snapshot.selectedHandle(
+                touchX: startX, timelineWidth: timelineWidth)
+            musicDragSnapshot = snapshot
+        }
+        guard let snapshot = musicDragSnapshot, let handle = musicDragHandle,
+              let updated = snapshot.edit(
+                handle: handle, deltaSeconds: deltaX / timelineWidth * duration)
+        else { return }
+        musicSettings.offset = updated.offset
+        musicClip = updated.clip
+        suggestedBeatAlignment = nil
+        suggestedCueCamera = nil
+        refreshMusicPreviewPosition()
+    }
+
     func endMusicDrag() {
         musicDragInitialOffset = nil
+        musicDragSnapshot = nil
+        musicDragHandle = nil
         saveMusicSettings()
     }
 
     func setMusicStartAtPlayhead() {
         setMusicOffset(selectedTime)
+    }
+
+    /// Deliberate manual action: align the first measured audio transient
+    /// after sourceIn to the video playhead. Never invent beats from BPM.
+    func alignFirstMusicAccentToPlayhead() {
+        guard musicAsset != nil, let analysis = musicAnalysis,
+              let firstAccent = analysis.onsets.first(where: {
+                  $0 >= musicClip.sourceIn && $0 < effectiveSourceDuration
+              }), !isExporting else {
+            musicStatus = "Nessun accento misurato disponibile: analizza prima la traccia."
+            return
+        }
+        let offset = selectedTime - (firstAccent - musicClip.sourceIn)
+        guard offset >= 0, offset < duration else {
+            musicStatus = String(format:
+                "Impossibile allineare questo accento al playhead %.2f s: serve un offset precedente allo 0.",
+                selectedTime)
+            return
+        }
+        setMusicOffset(offset)
+        musicStatus = String(format:
+            "Primo accento (%.2f s nella sorgente) allineato al playhead %.2f s.",
+            firstAccent, selectedTime)
+    }
+
+    func nudgeMusicOffset(by delta: Double) {
+        guard delta.isFinite else { return }
+        setMusicOffset(musicSettings.offset + delta)
     }
 
     func setMusicSourceIn(_ seconds: Double) {
