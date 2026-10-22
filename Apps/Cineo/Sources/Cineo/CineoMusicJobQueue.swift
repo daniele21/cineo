@@ -81,6 +81,20 @@ final class CineoMusicJobQueue: ObservableObject {
         pump()
     }
 
+    /// Project Save As changes the source URL; preserve the association to
+    /// the same video without relaunching or cancelling remote generation.
+    func relinkVideo(from old: URL, to new: URL) {
+        let previous = old.standardizedFileURL.path
+        let target = new.standardizedFileURL.path
+        guard previous != target else { return }
+        var changed = false
+        for i in jobs.indices where jobs[i].originVideoPath == previous {
+            jobs[i].originVideoPath = target
+            changed = true
+        }
+        if changed { save() }
+    }
+
     func retry(_ id: UUID) {
         guard let idx = jobs.firstIndex(where: { $0.id == id }),
               jobs[idx].phase == .interrupted || jobs[idx].phase == .failed else { return }
