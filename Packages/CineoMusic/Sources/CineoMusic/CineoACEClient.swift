@@ -91,6 +91,71 @@ public struct CineoACEClient: Sendable {
         }
     }
 
+    /// Repaint a local WAV/MP3, preserving the original source on disk.
+    /// The server receives "request" + "audio" form fields; no /lm job.
+    @discardableResult
+    public func repaint(request: CineoACERepaintRequest, source: URL, destination: URL,
+                        onStatus: @escaping @Sendable (String) -> Void = { _ in }) async throws -> URL {
+        try request.validate()
+        guard source.isFileURL, destination.isFileURL,
+              ["wav", "mp3"].contains(source.pathExtension.lowercased()),
+              source.standardizedFileURL != destination.standardizedFileURL,
+              destination.pathExtension.lowercased() == "wav",
+              !FileManager.default.fileExists(atPath: destination.path) else {
+            throw CineoMusicError.invalid("Repaint richiede sorgente WAV/MP3 e una nuova destinazione WAV.")
+        }
+        guard let attr = try? FileManager.default.attributesOfItem(atPath: source.path),
+              let bytes = attr[.size] as? NSNumber,
+              bytes.int64Value > 44, bytes.int64Value <= 125_000_000 else {
+            throw CineoMusicError.invalid("Sorgente repaint troppo grande o illeggibile (max 125 MB).")
+        }
+        try Task.checkCancellation()
+        onStatus("Repaint: verifica del server locale…")
+        try await healthCheck()
+        let sourceData = try Data(contentsOf: source)
+        let boundary = "cineo_repaint_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        let multipart = try CineoACEMultipartRepaint.make(
+            request: request, source: sourceData,
+            extension: source.pathExtension.lowercased(), boundary: boundary)
+        try Task.checkCancellation()
+        onStatus("Repaint: invio della traccia sorgente ad ACE-Step locale…")
+        let (reply, _) = try await send(path: "/synth", method: "POST", body: multipart,
+                                       contentType: "multipart/form-data; boundary=" + boundary)
+        guard let job = (try? JSONSerialization.jsonObject(with: reply) as? [String: Any])?["id"] as? String,
+              !job.isEmpty, job.count < 100,
+              job.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") })
+        else { throw CineoMusicError.server("ACE-Step /synth non ha restituito un job repaint valido.") }
+        do {
+            onStatus("Repaint: generazione dell'intervallo selezionato (DiT + VAE)…")
+            try await waitForJob(job)
+            let (result, response) = try await send(path: "/job", method: "GET",
+                                                     query: ["id": job, "result": "1"])
+            let wav = try Self.wavPayload(result,
+                        contentType: response.value(forHTTPHeaderField: "Content-Type") ?? "")
+            guard wav.count > 44, wav.prefix(4) == Data("RIFF".utf8),
+                  wav.dropFirst(8).prefix(4) == Data("WAVE".utf8) else {
+                throw CineoMusicError.server("Repaint ACE-Step non ha restituito un WAV valido.")
+            }
+            try Task.checkCancellation()
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            let temp = destination.deletingLastPathComponent()
+                .appendingPathComponent("." + UUID().uuidString + ".wav")
+            defer { try? FileManager.default.removeItem(at: temp) }
+            try wav.write(to: temp, options: .atomic)
+            try Task.checkCancellation()
+            try FileManager.default.moveItem(at: temp, to: destination)
+            onStatus("Repaint completo: nuova traccia salvata, originale preservato.")
+            return destination
+        } catch {
+            if error is CancellationError {
+                let owner = self
+                Task.detached { try? await owner.cancelJob(job) }
+            }
+            throw error
+        }
+    }
+
     private func submit(_ path: String, data: Data) async throws -> String {
         let (responseData, _) = try await send(path: path, method: "POST", body: data)
         guard let object = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
@@ -123,7 +188,8 @@ public struct CineoACEClient: Sendable {
     }
 
     private func send(path: String, method: String, query: [String: String] = [:],
-                      body: Data? = nil) async throws -> (Data, HTTPURLResponse) {
+                      body: Data? = nil, contentType: String = "application/json")
+                      async throws -> (Data, HTTPURLResponse) {
         guard var c = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw CineoMusicError.invalid("URL locale ACE-Step non valido.")
         }
@@ -134,7 +200,7 @@ public struct CineoACEClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 120
-        if let body { request.httpBody = body; request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        if let body { request.httpBody = body; request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         let data: Data
         let response: URLResponse
         do { (data, response) = try await session.data(for: request) }
