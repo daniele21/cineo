@@ -84,6 +84,8 @@ final class CineoEditorModel: ObservableObject {
     private var originalAudioAnalysisTask: Task<Void, Never>?
     private var musicAnalysisTask: Task<Void, Never>?
     private var musicDragInitialOffset: Double?
+    private var musicDragSnapshot: CineoMusicDragSnapshot?
+    private var musicDragHandle: CineoMusicDragHandle?
 
     private struct StoredMusic: Codable {
         let settings: CineoMusicSettings
@@ -372,8 +374,32 @@ final class CineoEditorModel: ObservableObject {
         refreshMusicPreviewPosition()
     }
 
+    func dragMusicClip(deltaX: Double, startX: Double, timelineWidth: Double) {
+        guard musicAsset != nil, !isExporting, timelineWidth > 0,
+              deltaX.isFinite, startX.isFinite else { return }
+        if musicDragSnapshot == nil {
+            let snapshot = CineoMusicDragSnapshot(
+                offset: musicSettings.offset, clip: musicClip,
+                sourceDuration: effectiveSourceDuration, videoDuration: duration)
+            musicDragHandle = snapshot.selectedHandle(
+                touchX: startX, timelineWidth: timelineWidth)
+            musicDragSnapshot = snapshot
+        }
+        guard let snapshot = musicDragSnapshot, let handle = musicDragHandle,
+              let updated = snapshot.edit(
+                handle: handle, deltaSeconds: deltaX / timelineWidth * duration)
+        else { return }
+        musicSettings.offset = updated.offset
+        musicClip = updated.clip
+        suggestedBeatAlignment = nil
+        suggestedCueCamera = nil
+        refreshMusicPreviewPosition()
+    }
+
     func endMusicDrag() {
         musicDragInitialOffset = nil
+        musicDragSnapshot = nil
+        musicDragHandle = nil
         saveMusicSettings()
     }
 
