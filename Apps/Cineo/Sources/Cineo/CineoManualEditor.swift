@@ -47,6 +47,8 @@ final class CineoEditorModel: ObservableObject {
     @Published private(set) var importedActionMarkers: [ImportedActionMarker] = []
     @Published var showingInstructions = false
     @Published var showingMusic = false
+    // Backend lifecycle belongs to Cineo, never to a specific .cineo project.
+    let aceBackend = CineoACEBackendController()
     @Published var musicSettings = CineoMusicSettings()
     @Published var musicAsset: CineoMusicAsset?
     @Published var musicDisplayName = ""
