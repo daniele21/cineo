@@ -102,6 +102,24 @@ public struct CineoCutList: Codable, Equatable, Sendable {
         return try CineoCutList(sourceDuration: sourceDuration, retained: survivors)
     }
 
+    /// Intersect source-timed narration/ducking ranges with kept spans and
+    /// return their intervals in the *edited output* clock.
+    public func outputRanges(overlappingSourceStart start: Double,
+                             end: Double) -> [Span] {
+        guard start.isFinite, end.isFinite, start >= 0, end > start else { return [] }
+        var results: [Span] = []
+        var outputCursor = 0.0
+        for span in retained {
+            let a = max(start, span.start), b = min(end, span.end)
+            if b > a {
+                results.append(Span(start: outputCursor + (a - span.start),
+                                    end: outputCursor + (b - span.start)))
+            }
+            outputCursor += span.duration
+        }
+        return results
+    }
+
     /// Next retained source position when playback reaches a removed region.
     /// Nil means the edited timeline has ended.
     public func nextRetainedSourceTime(after sourceSeconds: Double) -> Double? {

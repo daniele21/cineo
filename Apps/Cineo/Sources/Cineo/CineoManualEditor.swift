@@ -1453,6 +1453,10 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func undoCut() {
+        guard keyframes.isEmpty, musicAsset == nil, musicCues.isEmpty else {
+            status = "Annulla gli zoom e la musica prima di modificare i tagli."
+            return
+        }
         guard let previous = cutUndo.last else { return }
         do {
             try persistCutList(previous)
@@ -1467,6 +1471,10 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func redoCut() {
+        guard keyframes.isEmpty, musicAsset == nil, musicCues.isEmpty else {
+            status = "Annulla gli zoom e la musica prima di modificare i tagli."
+            return
+        }
         guard let next = cutRedo.last else { return }
         do {
             try persistCutList(next)
@@ -1687,6 +1695,7 @@ final class CineoEditorModel: ObservableObject {
         guard let url = sourceURL, !isExporting else { return }
         pausePreviewPlayback()
         let plan = currentPlan
+        let exportCuts = cutList
         // Freeze the music plan at export start; UI changes must not alter a
         // render already in progress.
         let exportMusicURL = musicURL
@@ -1724,7 +1733,7 @@ final class CineoEditorModel: ObservableObject {
                 let videoOnly = folder.appendingPathComponent("." + UUID().uuidString + "-silent.mp4")
                 defer { try? FileManager.default.removeItem(at: videoOnly) }
                 try await CineoSceneExporter().export(
-                    source: url, destination: videoOnly, plan: plan, cuts: cutList
+                    source: url, destination: videoOnly, plan: plan, cuts: exportCuts
                 ) { [weak self] progress in
                     Task { @MainActor [weak self] in self?.exportProgress = progress * 0.85 }
                 }
@@ -1751,6 +1760,14 @@ final class CineoEditorModel: ObservableObject {
                         resolvedDuckingRanges = activity
                     }
                 }
+                if let exportCuts {
+                    resolvedDuckingRanges = resolvedDuckingRanges.flatMap { range in
+                        exportCuts.outputRanges(
+                            overlappingSourceStart: range.start,
+                            end: range.end
+                        ).map { CineoAudioActivityRange(start: $0.start, end: $0.end) }
+                    }
+                }
                 if exportMusicURL != nil || hasOriginalAudio || !exportCueSounds.isEmpty {
                     status = "Composizione audio/video e applicazione fade…"
                     try await CineoAudioMuxer.mux(
@@ -1759,7 +1776,7 @@ final class CineoEditorModel: ObservableObject {
                         settings: exportMusicURL == nil ? nil : exportMusicSettings,
                         clip: exportMusicClip,
                         ducking: exportDucking, duckingRanges: resolvedDuckingRanges,
-                        cueSounds: exportCueSounds, cuts: cutList,
+                        cueSounds: exportCueSounds, cuts: exportCuts,
                         destination: dest)
                 } else {
                     try FileManager.default.moveItem(at: videoOnly, to: dest)
