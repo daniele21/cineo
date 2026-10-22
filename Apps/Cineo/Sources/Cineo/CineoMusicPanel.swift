@@ -341,6 +341,10 @@ struct CineoMusicPanel: View {
                             Button(String(format: "%@ %.2f s", cue.kind.rawValue, cue.at)) {
                                 editor.scrub(cue.at)
                             }
+                            Button("Prepara zoom") {
+                                editor.proposeCueCamera(cue.id)
+                            }.disabled(editor.isExporting)
+                              .help("Propone un'animazione di camera sul cue, senza modificare il video")
                             Button { editor.removeMusicCue(cue.id) } label: {
                                 Image(systemName: "xmark.circle")
                             }.help("Elimina cue")
@@ -348,7 +352,20 @@ struct CineoMusicPanel: View {
                     }.font(.caption)
                 }
             }
-            Text("I cue sono marcatori modificabili, non effetti sonori generati automaticamente.")
+            if let candidate = editor.suggestedCueCamera {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(candidate.description).font(.caption.weight(.medium))
+                    Text("\(candidate.frames.count) keyframe nuovi. Gli zoom esistenti non verranno sovrascritti.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    HStack {
+                        Button("Applica animazione") { editor.applyCueCamera() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(editor.isExporting)
+                        Button("Annulla") { editor.suggestedCueCamera = nil }
+                    }
+                }
+            }
+            Text("I cue possono creare zoom e transizioni solo previa conferma. Non sono effetti audio.")
                 .font(.caption2).foregroundStyle(.secondary)
             Divider()
             HStack {

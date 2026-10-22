@@ -8,13 +8,17 @@ public struct CineoBeatAnalysis: Equatable, Sendable {
     public let waveform: [Float]
     public let onsets: [Double]
     public let estimatedBPM: Double?
+    /// 20ms resolution RMS envelopes for audio-activity ducking. Unlike the
+    /// 256-column waveform, this retains short pauses and speech boundaries.
+    public let activityLevels: [Float]
 
     public init(sourceDuration: Double, waveform: [Float], onsets: [Double],
-                estimatedBPM: Double?) {
+                estimatedBPM: Double?, activityLevels: [Float] = []) {
         self.sourceDuration = sourceDuration
         self.waveform = waveform
         self.onsets = onsets
         self.estimatedBPM = estimatedBPM
+        self.activityLevels = activityLevels
     }
 }
 
@@ -36,7 +40,7 @@ public enum CineoBeatAnalyzer {
             waveform[min(bins - 1, i * bins / count)] = max(waveform[min(bins - 1, i * bins / count)], value)
         }
 
-        let hop = max(64, Int(sampleRate * 0.02))
+        let hop = max(16, Int(sampleRate * 0.02))
         let window = max(hop * 2, Int(sampleRate * 0.04))
         guard count > window * 2 else {
             return .init(sourceDuration: duration, waveform: waveform, onsets: [], estimatedBPM: nil)
@@ -107,6 +111,6 @@ public enum CineoBeatAnalyzer {
             if agreement >= 0.6 { bpm = (60 / median * 10).rounded() / 10 }
         }
         return .init(sourceDuration: duration, waveform: waveform, onsets: onsets,
-                     estimatedBPM: bpm)
+                     estimatedBPM: bpm, activityLevels: levels.map { Float($0) })
     }
 }

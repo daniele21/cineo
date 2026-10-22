@@ -9,6 +9,7 @@ import CoreImage
 import CineoScene
 import CineoProject
 import CineoMusic
+import CineoAudio
 import CryptoKit
 
 @MainActor
@@ -54,6 +55,7 @@ final class CineoEditorModel: ObservableObject {
     @Published var duckingSettings = CineoDuckingSettings()
     @Published var musicCues: [CineoMusicCue] = []
     @Published var selectedCueKind: CineoMusicCueKind = .hit
+    @Published var suggestedCueCamera: CineoCueCameraSuggestion?
     @Published var originalAudioAnalysis: CineoBeatAnalysis?
     @Published var musicAnalysis: CineoBeatAnalysis?
     @Published var suggestedBeatAlignment: CineoBeatAlignment?
@@ -140,6 +142,7 @@ final class CineoEditorModel: ObservableObject {
         musicClip = CineoMusicClip()
         duckingSettings = CineoDuckingSettings()
         musicCues = []
+        suggestedCueCamera = nil
         musicSettings = CineoMusicSettings(duration: max(10, min(600, duration)))
         guard let file = musicStateURL,
               let data = try? Data(contentsOf: file),
@@ -201,7 +204,7 @@ final class CineoEditorModel: ObservableObject {
 
     var musicDuckingRanges: [CineoAudioActivityRange] {
         guard duckingSettings.enabled, let analysis = originalAudioAnalysis else { return [] }
-        return CineoAudioActivityDetector.ranges(peakBins: analysis.waveform,
+        return CineoAudioActivityDetector.ranges(peakBins: analysis.activityLevels,
             duration: analysis.sourceDuration, threshold: duckingSettings.threshold)
     }
 
@@ -257,7 +260,54 @@ final class CineoEditorModel: ObservableObject {
     func removeMusicCue(_ id: String) {
         guard !isExporting else { return }
         musicCues.removeAll { $0.id == id }
+        suggestedCueCamera = nil
         saveMusicSettings()
+    }
+
+    /// Convert a manually authored cue into a camera edit only after preview
+    /// and explicit confirmation; never overwrite an existing animation.
+    func proposeCueCamera(_ cueID: String) {
+        guard !isExporting, let cue = musicCues.first(where: { $0.id == cueID }) else {
+            suggestedCueCamera = nil
+            return
+        }
+        suggestedCueCamera = CineoCueCameraDirector.propose(
+            cue: cue, videoDuration: duration,
+            existing: keyframes.map { .init(time: $0.time, zoom: $0.zoom) },
+            focusX: focusX, focusY: focusY)
+        musicStatus = suggestedCueCamera?.description ??
+            "Non posso applicare questo cue: troppo vicino al bordo oppure esistono zoom nell'intervallo."
+    }
+
+    func applyCueCamera() {
+        guard !isExporting, let pending = suggestedCueCamera,
+              let cue = musicCues.first(where: { $0.id == pending.cueID }),
+              let rechecked = CineoCueCameraDirector.propose(
+                cue: cue, videoDuration: duration,
+                existing: keyframes.map { .init(time: $0.time, zoom: $0.zoom) },
+                focusX: pending.frames.first(where: { $0.zoom > 1.02 })?.focusX ?? focusX,
+                focusY: pending.frames.first(where: { $0.zoom > 1.02 })?.focusY ?? focusY),
+              rechecked == pending else {
+            musicStatus = "La proposta è cambiata: richiedi una nuova anteprima prima di applicare."
+            suggestedCueCamera = nil
+            return
+        }
+        pausePreviewPlayback()
+        let original = keyframes
+        keyframes.append(contentsOf: pending.frames.map {
+            CineoCameraKeyframe(time: $0.time, zoom: $0.zoom,
+                                focusX: $0.focusX, focusY: $0.focusY)
+        })
+        keyframes.sort { $0.time < $1.time }
+        if savePlan() {
+            importedActionMarkers = []
+            suggestedCueCamera = nil
+            musicStatus = "Cue applicato alla camera: " + pending.description
+            scrub(cue.at)
+        } else {
+            keyframes = original
+            suggestedCueCamera = nil
+        }
     }
 
     /// Shared music transport: up to two simultaneous layers for genuine
@@ -1124,7 +1174,7 @@ final class CineoEditorModel: ObservableObject {
                     let analysis = try await CineoMusicAudioAnalyzer.analyze(url: url)
                     try Task.checkCancellation()
                     resolvedDuckingRanges = CineoAudioActivityDetector.ranges(
-                        peakBins: analysis.waveform,
+                        peakBins: analysis.activityLevels,
                         duration: analysis.sourceDuration,
                         threshold: exportDucking.threshold)
                 }

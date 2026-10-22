@@ -4,8 +4,8 @@ import CineoMusic
 
 /// Adds imported/generated music and any original narration to an already
 /// rendered Cineo video. Never changes the original recording or rendered input.
-enum CineoAudioMuxer {
-    static func mux(video: URL, original: URL, music: URL?,
+public enum CineoAudioMuxer {
+    public static func mux(video: URL, original: URL, music: URL?,
                     settings: CineoMusicSettings?, clip: CineoMusicClip = .init(),
                     ducking: CineoDuckingSettings = .init(),
                     duckingRanges: [CineoAudioActivityRange] = [],
