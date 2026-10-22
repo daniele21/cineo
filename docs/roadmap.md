@@ -35,6 +35,15 @@ experience are deferred to the final E2E gate.
 4. **Final physical-Mac E2E:** capture → auto proposal → manual refine → music generation → 16:9 and 9:16 export, visual review and headphone listening. This is intentionally deferred until the earlier gates pass.
 5. **Distribution:** license audit, Developer ID signing/notarization, compatibility and rollback after product gates.
 
+## V1 timeline/cursor/brand increment (2026-10-22)
+
+See [detailed contract](v1-timeline-cursor-brand.md). This branch adds a pure
+cut-time mapper and preservation tests, same-renderer opt-in click rings,
+Cineo Ocean/Frost brand background presets, and a repair of the result-anchor
+Smart Camera test. **Video cut UI/export remain gated** until video, native
+audio, click telemetry and manual camera edits use the exact same output-time
+mapping; do not confuse an editable time model with a shipped trim feature.
+
 ## Planning rules
 
 - Each milestone is a **vertical outcome** with a demo and measurable exit criteria, not a bucket of classes.
