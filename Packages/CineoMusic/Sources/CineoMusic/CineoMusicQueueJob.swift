@@ -93,7 +93,7 @@ public struct CineoMusicQueueJob: Codable, Equatable, Identifiable, Sendable {
     }
 
     public mutating func recoverAfterAppRestart(outputExists: Bool) {
-        if phase == .running && outputExists {
+        if (phase == .running || phase == .interrupted) && outputExists {
             phase = .ready
             checkpoint = nil
             status = "Traccia generata recuperata dopo la riapertura."

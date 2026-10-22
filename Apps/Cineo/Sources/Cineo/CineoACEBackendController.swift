@@ -224,6 +224,19 @@ final class CineoACEBackendController: ObservableObject {
 
     /// Called by the durable job queue before a new remote submission.
     func ensureReady() async throws {
+        // An idle timeout might have closed the watchdog liveness pipe just
+        // before a new job arrived. Wait for the *previous* supervisor's
+        // termination handler to release ownership before starting a new one.
+        if phase == .stopped && server != nil {
+            for _ in 0..<100 {
+                if server == nil { break }
+                try Task.checkCancellation()
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            if server != nil {
+                throw CineoMusicError.unavailable("Il precedente motore ACE-Step è ancora in arresto.")
+            }
+        }
         if isReady {
             do { try await ping(); return } catch { /* stale readiness */ }
         }

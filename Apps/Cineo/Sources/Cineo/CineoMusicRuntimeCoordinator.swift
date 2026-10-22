@@ -10,7 +10,7 @@ final class CineoMusicRuntimeCoordinator {
     private let backend: CineoACEBackendController
     private var subscriptions = Set<AnyCancellable>()
     private var idleTask: Task<Void, Never>?
-    private let idleSeconds: UInt64 = 600
+    private let idleSeconds: Int64 = 600
 
     init(queue: CineoMusicJobQueue, backend: CineoACEBackendController) {
         self.queue = queue
