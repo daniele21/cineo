@@ -36,6 +36,14 @@ struct CineoMusicTimelineStrip: View {
                                                   width: clipWidth, height: size.height)
                             context.fill(Path(roundedRect: clipRect, cornerRadius: 4),
                                          with: .color(CineoBrand.ocean.opacity(0.25)))
+                            // Direct-manipulation edge handles. Left edge trims
+                            // sourceIn/output start; right edge trims output end.
+                            for x in [startX, startX + clipWidth] {
+                                let marker = CGRect(x: x - 3, y: 3,
+                                                    width: 6, height: size.height - 6)
+                                context.fill(Path(roundedRect: marker, cornerRadius: 2),
+                                             with: .color(.white.opacity(0.92)))
+                            }
                             if let analysis = editor.musicAnalysis, analysis.sourceDuration > 0,
                                let segments = try? editor.musicClip.segments(
                                     sourceDuration: editor.musicActualDuration > 0
@@ -85,10 +93,12 @@ struct CineoMusicTimelineStrip: View {
                         .contentShape(Rectangle())
                         .gesture(DragGesture(minimumDistance: 4)
                             .onChanged { gesture in
-                                editor.moveMusicByDrag(deltaX: Double(gesture.translation.width),
-                                                       width: Double(geo.size.width))
+                                editor.dragMusicClip(
+                                    deltaX: Double(gesture.translation.width),
+                                    startX: Double(gesture.startLocation.x),
+                                    timelineWidth: Double(geo.size.width))
                             }.onEnded { _ in editor.endMusicDrag() })
-                        .help("Trascina per spostare la traccia senza cambiare il tempo della sorgente.")
+                        .help("Trascina il centro per spostare la musica; usa le maniglie laterali per tagliare inizio e fine.")
                     }
                     .frame(height: 28)
                     GeometryReader { ruler in
