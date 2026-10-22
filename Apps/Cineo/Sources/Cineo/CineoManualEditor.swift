@@ -381,6 +381,34 @@ final class CineoEditorModel: ObservableObject {
         setMusicOffset(selectedTime)
     }
 
+    /// Deliberate manual action: align the first measured audio transient
+    /// after sourceIn to the video playhead. Never invent beats from BPM.
+    func alignFirstMusicAccentToPlayhead() {
+        guard musicAsset != nil, let analysis = musicAnalysis,
+              let firstAccent = analysis.onsets.first(where: {
+                  $0 >= musicClip.sourceIn && $0 < effectiveSourceDuration
+              }), !isExporting else {
+            musicStatus = "Nessun accento misurato disponibile: analizza prima la traccia."
+            return
+        }
+        let offset = selectedTime - (firstAccent - musicClip.sourceIn)
+        guard offset >= 0, offset < duration else {
+            musicStatus = String(format:
+                "Impossibile allineare questo accento al playhead %.2f s: serve un offset precedente allo 0.",
+                selectedTime)
+            return
+        }
+        setMusicOffset(offset)
+        musicStatus = String(format:
+            "Primo accento (%.2f s nella sorgente) allineato al playhead %.2f s.",
+            firstAccent, selectedTime)
+    }
+
+    func nudgeMusicOffset(by delta: Double) {
+        guard delta.isFinite else { return }
+        setMusicOffset(musicSettings.offset + delta)
+    }
+
     func setMusicSourceIn(_ seconds: Double) {
         guard musicAsset != nil, !isExporting else { return }
         musicClip.sourceIn = max(0, min(seconds, max(0, effectiveSourceDuration - 0.04)))
