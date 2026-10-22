@@ -2,20 +2,29 @@ import Foundation
 
 /// Music-volume automation while the recording's original audio is active.
 /// This is an amplitude gate, not speaker/voice identification.
+public enum CineoDuckingDetectionMode: String, Codable, CaseIterable, Sendable {
+    case anyAudio
+    case likelySpeech
+}
+
 public struct CineoDuckingSettings: Codable, Equatable, Sendable {
     public var enabled: Bool
     public var level: Double
     public var threshold: Double
     public var attack: Double
     public var release: Double
+    /// Optional for compatibility with prior music.json project files.
+    public var detectionMode: CineoDuckingDetectionMode?
 
     public init(enabled: Bool = false, level: Double = 0.25, threshold: Double = 0.08,
-                attack: Double = 0.20, release: Double = 0.55) {
+                attack: Double = 0.20, release: Double = 0.55,
+                detectionMode: CineoDuckingDetectionMode? = nil) {
         self.enabled = enabled
         self.level = level
         self.threshold = threshold
         self.attack = attack
         self.release = release
+        self.detectionMode = detectionMode
     }
 
     public func validate() throws {
