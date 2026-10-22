@@ -47,6 +47,7 @@ final class CineoEditorModel: ObservableObject {
     @Published private(set) var importedActionMarkers: [ImportedActionMarker] = []
     @Published var showingInstructions = false
     @Published var showingMusic = false
+    let musicQueue = CineoMusicJobQueue()
     // Backend lifecycle belongs to Cineo, never to a specific .cineo project.
     let aceBackend = CineoACEBackendController()
     @Published var musicSettings = CineoMusicSettings()
@@ -617,40 +618,17 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func generateMusic() {
-        guard sourceURL != nil, !isGeneratingMusic, !isExporting else { return }
-        let settings = musicSettings
-        do { try settings.validate(videoDuration: duration) }
-        catch { musicStatus = error.localizedDescription; return }
-        let destination = musicDirectory.appendingPathComponent(UUID().uuidString + ".wav")
-        isGeneratingMusic = true
-        musicStatus = "Preparazione ACE-Step…"
-        musicTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let client = try CineoACEClient()
-                try await client.generate(settings: settings, destination: destination) { message in
-                    Task { @MainActor [weak self] in self?.musicStatus = message }
-                }
-                try Task.checkCancellation()
-                self.musicAsset = CineoMusicAsset(fileName: destination.lastPathComponent, settings: settings)
-                self.musicClip = CineoMusicClip()
-                self.musicDisplayName = "ACE-Step · \(settings.bpm) BPM · \(Int(settings.duration)) s"
-                self.prepareMusicPlayer()
-                self.saveMusicSettings()
-                self.musicStatus = "Traccia generata e salvata. Premi Play per ascoltarla con il video."
-            } catch is CancellationError {
-                try? FileManager.default.removeItem(at: destination)
-                self.musicStatus = "Generazione musicale annullata."
-            } catch {
-                self.musicStatus = "ACE-Step: \(error.localizedDescription)"
-            }
-            self.isGeneratingMusic = false
-            self.musicTask = nil
+        guard let sourceURL, !isExporting, !isSavingProject else { return }
+        do {
+            try musicSettings.validate(videoDuration: duration)
+            try musicQueue.enqueueGeneration(settings: musicSettings,
+                                             videoURL: sourceURL, label: title)
+            musicStatus = "Generazione aggiunta alla coda. Puoi chiudere Musica e continuare a montare."
+        } catch {
+            musicStatus = "Impossibile accodare generazione: \(error.localizedDescription)"
         }
     }
 
-    /// Mark an exact interval on the *video* timeline. The pure Swift
-    /// contract maps to source time and rejects loop seam crossings.
     func markRepaintStart() {
         repaintStart = selectedTime
         if repaintEnd <= repaintStart { repaintEnd = min(duration, repaintStart + 4) }
@@ -661,60 +639,68 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func repaintMusicSelection() {
-        guard let original = musicURL, !isGeneratingMusic, !isExporting else { return }
-        let request: CineoACERepaintRequest
+        guard let original = musicURL, let sourceURL,
+              !isExporting, !isSavingProject else { return }
         do {
-            request = try .fromVideoSelection(
+            let request = try CineoACERepaintRequest.fromVideoSelection(
                 start: repaintStart, end: repaintEnd, clip: musicClip,
                 offset: musicSettings.offset, sourceDuration: effectiveSourceDuration,
                 videoDuration: duration, prompt: musicSettings.caption, seed: musicSettings.seed)
             guard ["wav", "mp3"].contains(original.pathExtension.lowercased()) else {
-                throw CineoMusicError.invalid(
-                    "Repaint ACE-Step accetta WAV o MP3. Importa la traccia in uno di questi formati.")
+                throw CineoMusicError.invalid("Repaint ACE-Step richiede audio WAV oppure MP3.")
             }
+            try musicQueue.enqueueRepaint(settings: musicSettings, videoURL: sourceURL,
+                label: title, request: request, audioURL: original)
+            musicStatus = "Repaint aggiunto alla coda. La sorgente non verrà modificata."
         } catch {
-            musicStatus = error.localizedDescription
-            return
-        }
-        let destination = musicDirectory.appendingPathComponent(UUID().uuidString + ".wav")
-        isGeneratingMusic = true
-        musicStatus = String(format:
-            "Repaint ACE-Step da %.2f a %.2f s della sorgente. Audio originale intatto.",
-            request.sourceStart, request.sourceEnd)
-        musicTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let client = try CineoACEClient()
-                try await client.repaint(request: request, source: original,
-                                         destination: destination) { message in
-                    Task { @MainActor [weak self] in self?.musicStatus = message }
-                }
-                try Task.checkCancellation()
-                guard self.musicURL == original else {
-                    try? FileManager.default.removeItem(at: destination)
-                    throw CineoMusicError.invalid(
-                        "La traccia è cambiata durante il repaint. Risultato non applicato.")
-                }
-                // Only after successful WAV validation do we switch the
-                // active reference. The old source file is never removed.
-                self.musicAsset = CineoMusicAsset(
-                    fileName: destination.lastPathComponent, settings: self.musicSettings)
-                self.musicDisplayName = "Repaint · (Int(request.sourceStart))–(Int(request.sourceEnd)) s"
-                self.prepareMusicPlayer()
-                self.saveMusicSettings()
-                self.musicStatus = "Repaint pronto. La vecchia traccia resta in Media."
-            } catch is CancellationError {
-                try? FileManager.default.removeItem(at: destination)
-                self.musicStatus = "Repaint annullato; musica originale intatta."
-            } catch {
-                self.musicStatus = "Repaint non applicato: (error.localizedDescription)"
-            }
-            self.isGeneratingMusic = false
-            self.musicTask = nil
+            musicStatus = "Impossibile accodare repaint: \(error.localizedDescription)"
         }
     }
 
-    func cancelMusicGeneration() { musicTask?.cancel() }
+    /// Results belong to their source video and never auto-replace a track.
+    func canApplyMusicJob(_ job: CineoMusicQueueJob) -> Bool {
+        job.phase == .ready && sourceURL?.standardizedFileURL.path == job.originVideoPath
+    }
+
+    func applyMusicJob(_ id: UUID) {
+        guard !isExporting, !isSavingProject,
+              let job = musicQueue.jobs.first(where: { $0.id == id }),
+              canApplyMusicJob(job) else {
+            musicStatus = "Apri prima il video corrispondente al job completato."
+            return
+        }
+        do {
+            try job.settings.validate(videoDuration: duration)
+            let result = URL(fileURLWithPath: job.destinationPath)
+            let bytes = try Data(contentsOf: result, options: [.mappedIfSafe])
+            guard bytes.count > 44,
+                  bytes.prefix(4) == Data("RIFF".utf8),
+                  bytes.dropFirst(8).prefix(4) == Data("WAVE".utf8) else {
+                throw CineoMusicError.invalid("Il WAV del job è incompleto o danneggiato.")
+            }
+            try FileManager.default.createDirectory(at: musicDirectory,
+                                                    withIntermediateDirectories: true)
+            let newPath = musicDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+            try FileManager.default.copyItem(at: result, to: newPath)
+            // User explicitly accepted the finished job: this is the sole
+            // point at which the active soundtrack may change.
+            musicSettings = job.settings
+            musicAsset = CineoMusicAsset(fileName: newPath.lastPathComponent,
+                                         settings: job.settings)
+            musicClip = CineoMusicClip()
+            musicDisplayName = (job.kind == .generation ? "ACE-Step · " : "Repaint · ") + job.title
+            prepareMusicPlayer()
+            saveMusicSettings()
+            musicStatus = "Traccia applicata dal job ACE-Step. Sorgenti originali preservate."
+        } catch {
+            musicStatus = "Impossibile applicare il risultato: \(error.localizedDescription)"
+        }
+    }
+
+    func cancelMusicGeneration() {
+        guard let id = musicQueue.activeID else { return }
+        musicQueue.cancel(id)
+    }
 
     func importMusicDialog() {
         guard !isExporting, !isGeneratingMusic else { return }
@@ -779,7 +765,7 @@ final class CineoEditorModel: ObservableObject {
         guard !isExporting && !isSavingProject else { return }
         status = "Caricamento del video o progetto…"
         pausePreviewPlayback()
-        musicTask?.cancel()
+        // Music jobs are owned by the application queue; no cancellation on navigation.
         musicAnalysisTask?.cancel()
         originalAudioAnalysisTask?.cancel()
         musicPlayer?.pause()
@@ -902,6 +888,7 @@ final class CineoEditorModel: ObservableObject {
                     let copied = location.appendingPathComponent("Media").appendingPathComponent(musicAsset.fileName)
                     try FileManager.default.copyItem(at: originalMusic, to: copied)
                 }
+                musicQueue.relinkVideo(from: source, to: savedSource)
                 projectURL = location
                 sourceURL = savedSource
                 if musicAsset != nil { prepareMusicPlayer() }
@@ -1012,7 +999,7 @@ final class CineoEditorModel: ObservableObject {
             return
         }
         pausePreviewPlayback()
-        musicTask?.cancel()
+        // Music jobs are owned by the application queue; no cancellation on navigation.
         musicPlayer = nil
         previewPlayer = nil
         previewFrameOutput = nil
