@@ -242,6 +242,47 @@ struct CineoInstructionDocumentTests {
         #expect(try document.compile(duration: 40, over: base) == base)
     }
 
+    @Test func musicMixCueAndCrossfadeRoundTrip() throws {
+        let json = """
+        {"version":1,"timebase":"output","actions":[],
+         "music":{"type":"music.generate","caption":"Electronic pads","bpm":110,
+                  "duration":20,"keyscale":"C major","seed":1,
+                  "volume":0.3,"offset":1,"fadeIn":0.5,"fadeOut":1.0,
+                  "sourceIn":2,"clipDuration":14,"loop":true,"crossfade":0.4,
+                  "ducking":{"enabled":true,"quietVolume":0.2,"thresholdDB":-32,
+                             "attack":0.1,"release":0.45},
+                  "cues":[{"id":"reveal","time":5.5,"label":"Reveal"}]}}
+        """
+        let document = try CineoInstructionDocument.decode(Data(json.utf8))
+        #expect(document.music?.crossfade == 0.4)
+        #expect(document.music?.ducking?.enabled == true)
+        #expect(document.music?.cues?.first?.time == 5.5)
+        let encoded = try JSONEncoder().encode(document)
+        let restored = try CineoInstructionDocument.decode(encoded)
+        #expect(restored.music?.cues?.first?.id == "reveal")
+        #expect(try document.compile(duration: 25, over: base) == base)
+    }
+
+    @Test func musicRejectsInvalidCueTimingAndUnknownDuckingFields() {
+        let invalid = """
+        {"version":1,"timebase":"output","actions":[],
+         "music":{"type":"music.generate","caption":"Music","bpm":110,
+                  "duration":20,"keyscale":"C major","seed":1,
+                  "volume":0.3,"offset":1,"fadeIn":0.5,"fadeOut":1,
+                  "cues":[{"id":"late","time":99,"label":"Late"}]}}
+        """
+        #expect(throws: CineoInstructionError.self) { try compile(invalid, duration: 25) }
+        let extra = """
+        {"version":1,"timebase":"output","actions":[],
+         "music":{"type":"music.generate","caption":"Music","bpm":110,
+                  "duration":20,"keyscale":"C major","seed":1,
+                  "volume":0.3,"offset":1,"fadeIn":0.5,"fadeOut":1,
+                  "ducking":{"enabled":true,"quietVolume":0.2,"thresholdDB":-35,
+                             "attack":0.1,"release":0.5,"fakeLLM":true}}}
+        """
+        #expect(throws: CineoInstructionError.self) { try compile(extra, duration: 25) }
+    }
+
     @Test func musicRejectsUnknownFieldsAndInvalidBPM() {
         let extra = """
         {"version":1,"timebase":"output","actions":[],

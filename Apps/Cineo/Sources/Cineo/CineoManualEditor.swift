@@ -51,6 +51,9 @@ final class CineoEditorModel: ObservableObject {
     @Published var musicDisplayName = ""
     @Published var musicActualDuration = 0.0
     @Published var musicClip = CineoMusicClip()
+    @Published var musicDucking = CineoDuckingSettings()
+    @Published var musicCues: [CineoMusicCue] = []
+    @Published var originalAudioActivity: [CineoAudioActivity] = []
     @Published var musicAnalysis: CineoBeatAnalysis?
     @Published var suggestedBeatAlignment: CineoBeatAlignment?
     @Published var musicStatus = "Imposta la musica e avvia ACE-Step locale, oppure importa un audio."
@@ -72,6 +75,8 @@ final class CineoEditorModel: ObservableObject {
     private var exportTask: Task<Void, Never>?
     private var musicTask: Task<Void, Never>?
     private var musicPlayer: AVPlayer?
+    private var musicOverlapPlayer: AVPlayer?
+    private var originalActivityTask: Task<Void, Never>?
     private var musicAnalysisTask: Task<Void, Never>?
     private var musicDragInitialOffset: Double?
 
@@ -80,6 +85,8 @@ final class CineoEditorModel: ObservableObject {
         let asset: CineoMusicAsset?
         let displayName: String?
         let clip: CineoMusicClip?
+        let ducking: CineoDuckingSettings?
+        let cues: [CineoMusicCue]?
     }
 
     private var musicDirectory: URL {
@@ -105,9 +112,12 @@ final class CineoEditorModel: ObservableObject {
         guard let file = musicStateURL else { return }
         do {
             try musicSettings.validate(videoDuration: duration)
+            try musicDucking.validate()
+            for cue in musicCues { try cue.validate(videoDuration: duration) }
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             let stored = StoredMusic(settings: musicSettings, asset: musicAsset,
-                                     displayName: musicDisplayName, clip: musicClip)
+                                     displayName: musicDisplayName, clip: musicClip,
+                                     ducking: musicDucking, cues: musicCues)
             try JSONEncoder().encode(stored).write(to: file, options: .atomic)
             refreshMusicPreviewPosition()
         } catch {
@@ -117,14 +127,20 @@ final class CineoEditorModel: ObservableObject {
 
     private func restoreMusicSettings() {
         musicPlayer?.pause()
+        musicOverlapPlayer?.pause()
         musicPlayer = nil
+        musicOverlapPlayer = nil
         musicAnalysisTask?.cancel()
+        originalActivityTask?.cancel()
+        originalAudioActivity = []
         musicAnalysis = nil
         suggestedBeatAlignment = nil
         musicAsset = nil
         musicDisplayName = ""
         musicActualDuration = 0
         musicClip = CineoMusicClip()
+        musicDucking = CineoDuckingSettings()
+        musicCues = []
         musicSettings = CineoMusicSettings(duration: max(10, min(600, duration)))
         guard let file = musicStateURL,
               let data = try? Data(contentsOf: file),
@@ -132,6 +148,9 @@ final class CineoEditorModel: ObservableObject {
               (try? stored.settings.validate(videoDuration: duration)) != nil else { return }
         musicSettings = stored.settings
         musicClip = stored.clip ?? CineoMusicClip()
+        musicDucking = stored.ducking ?? CineoDuckingSettings()
+        musicCues = (stored.cues ?? []).filter { (try? $0.validate(videoDuration: duration)) != nil }
+            .sorted { $0.time < $1.time }
         if let asset = stored.asset, (try? asset.validate()) != nil {
             musicAsset = asset
             musicDisplayName = stored.displayName ?? asset.fileName
@@ -150,10 +169,13 @@ final class CineoEditorModel: ObservableObject {
 
     private func prepareMusicPlayer() {
         musicPlayer?.pause()
+        musicOverlapPlayer?.pause()
         musicAnalysisTask?.cancel()
         musicAnalysis = nil
         suggestedBeatAlignment = nil
         musicPlayer = musicURL.map { AVPlayer(url: $0) }
+        musicOverlapPlayer = musicURL.map { AVPlayer(url: $0) }
+        analyzeOriginalAudioForDucking()
         musicActualDuration = 0
         if let url = musicURL {
             musicAnalysisTask = Task { [weak self] in
@@ -180,26 +202,61 @@ final class CineoEditorModel: ObservableObject {
             "Traccia pronta per anteprima ed export. Analisi waveform in corso…"
     }
 
-    private func refreshMusicPreviewPosition() {
-        guard let player = musicPlayer else { return }
-        guard let position = musicClip.playbackPosition(videoTime: selectedTime,
-                                 sourceDuration: effectiveSourceDuration,
-                                 videoDuration: duration, offset: musicSettings.offset) else {
-            player.pause()
-            player.volume = 0
-            return
+    private func analyzeOriginalAudioForDucking() {
+        originalActivityTask?.cancel()
+        originalAudioActivity = []
+        guard musicDucking.enabled, let sourceURL else { return }
+        let threshold = musicDucking.thresholdDB
+        originalActivityTask = Task { [weak self] in
+            do {
+                let detected = try await CineoMusicAudioAnalyzer.activity(
+                    url: sourceURL, thresholdDB: threshold)
+                try Task.checkCancellation()
+                guard let self, self.sourceURL == sourceURL,
+                      self.musicDucking.enabled,
+                      self.musicDucking.thresholdDB == threshold else { return }
+                self.originalAudioActivity = detected
+                self.musicStatus = "Ducking: \(detected.count) intervalli con audio originale sopra soglia."
+            } catch is CancellationError {
+                // Source or configuration changed.
+            } catch {
+                self?.musicStatus = "Ducking non disponibile: \(error.localizedDescription)"
+            }
         }
-        player.seek(to: CMTime(seconds: position, preferredTimescale: 600),
-                    toleranceBefore: .zero, toleranceAfter: .zero)
-        let elapsed = selectedTime - musicSettings.offset
-        let playable = musicClipLength
-        let fadeIn = min(musicSettings.fadeIn, playable / 2)
-        let fadeOut = min(musicSettings.fadeOut, playable / 2)
-        let rampIn = fadeIn > 0 ? min(1, elapsed / fadeIn) : 1
-        let rampOut = fadeOut > 0 ? min(1, (playable - elapsed) / fadeOut) : 1
-        player.volume = Float(musicSettings.volume * max(0, min(rampIn, rampOut)))
-        if isPreviewPlaying && player.rate == 0 { player.play() }
-        if !isPreviewPlaying { player.pause() }
+    }
+
+    private func applyMusicTransport(at videoTime: Double, play: Bool) {
+        let sources = musicClip.sources(at: videoTime, sourceDuration: effectiveSourceDuration,
+                                        videoDuration: duration, offset: musicSettings.offset)
+        let length = musicClipLength
+        let local = videoTime - musicSettings.offset
+        let fadeIn = min(musicSettings.fadeIn, length / 2)
+        let fadeOut = min(musicSettings.fadeOut, length / 2)
+        let up = fadeIn > 0 ? min(1, max(0, local / fadeIn)) : 1
+        let down = fadeOut > 0 ? min(1, max(0, (length - local) / fadeOut)) : 1
+        let duck = CineoAudioDynamics.gain(at: videoTime, activity: originalAudioActivity,
+                                           settings: musicDucking)
+        for (lane, player) in [musicPlayer, musicOverlapPlayer].enumerated() {
+            guard let player else { continue }
+            guard let source = sources.first(where: { $0.lane == lane }) else {
+                player.pause()
+                player.volume = 0
+                continue
+            }
+            let current = player.currentTime().seconds
+            if !current.isFinite || abs(current - source.sourceTime) > 0.18 {
+                player.seek(to: CMTime(seconds: source.sourceTime, preferredTimescale: 600),
+                            toleranceBefore: .zero, toleranceAfter: .zero)
+            }
+            player.volume = Float(musicSettings.volume * max(0, min(up, down)) *
+                                  source.gain * duck)
+            if play && player.rate == 0 { player.play() }
+            if !play && player.rate != 0 { player.pause() }
+        }
+    }
+
+    private func refreshMusicPreviewPosition() {
+        applyMusicTransport(at: selectedTime, play: isPreviewPlaying)
     }
 
     func setMusicOffset(_ newValue: Double) {
@@ -230,6 +287,9 @@ final class CineoEditorModel: ObservableObject {
     func setMusicSourceIn(_ seconds: Double) {
         guard musicAsset != nil, !isExporting else { return }
         musicClip.sourceIn = max(0, min(seconds, max(0, effectiveSourceDuration - 0.04)))
+        if let overlap = musicClip.crossfade {
+            musicClip.crossfade = min(overlap, (effectiveSourceDuration - musicClip.sourceIn) * 0.40)
+        }
         suggestedBeatAlignment = nil
         saveMusicSettings()
     }
@@ -244,11 +304,92 @@ final class CineoEditorModel: ObservableObject {
     func setMusicLoop(_ enabled: Bool) {
         guard musicAsset != nil, !isExporting else { return }
         musicClip.loop = enabled
+        if !enabled { musicClip.crossfade = nil }
         if enabled && musicClip.duration == nil {
             musicClip.duration = max(0.04, duration - musicSettings.offset)
         }
         suggestedBeatAlignment = nil
         saveMusicSettings()
+    }
+
+    func setMusicCrossfade(_ seconds: Double) {
+        guard musicAsset != nil, !isExporting else { return }
+        let span = max(0.04, effectiveSourceDuration - musicClip.sourceIn)
+        musicClip.crossfade = min(max(0, seconds), min(1.5, span * 0.40))
+        saveMusicSettings()
+    }
+
+    func setMusicDuckingEnabled(_ enabled: Bool) {
+        guard !isExporting else { return }
+        musicDucking.enabled = enabled
+        analyzeOriginalAudioForDucking()
+        saveMusicSettings()
+    }
+
+    func setMusicDuckingQuietVolume(_ volume: Double) {
+        guard !isExporting else { return }
+        musicDucking.quietVolume = max(0, min(1, volume))
+        saveMusicSettings()
+    }
+
+    func setMusicDuckingThreshold(_ threshold: Double) {
+        guard !isExporting else { return }
+        musicDucking.thresholdDB = max(-80, min(-5, threshold))
+        analyzeOriginalAudioForDucking()
+        saveMusicSettings()
+    }
+
+    func addMusicCueAtPlayhead() {
+        guard musicAsset != nil, duration > 0, !isExporting else { return }
+        let time = min(max(0, selectedTime), max(0, duration - 0.01))
+        guard !musicCues.contains(where: { abs($0.time - time) < 0.07 }) else {
+            musicStatus = "Un cue musicale è già presente in questo punto."
+            return
+        }
+        musicCues.append(CineoMusicCue(time: time,
+                             label: "Cue \(musicCues.count + 1)"))
+        musicCues.sort { $0.time < $1.time }
+        saveMusicSettings()
+        musicStatus = "Cue aggiunto a \(String(format: "%.2f", time)) s. Nessuno zoom cambiato."
+    }
+
+    func renameMusicCue(_ id: String, label: String) {
+        guard !isExporting, let index = musicCues.firstIndex(where: { $0.id == id }) else { return }
+        let cleaned = String(label.prefix(60))
+        musicCues[index].label = cleaned
+        // Allow temporary empty text while editing; persist only nonempty.
+        if !cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            saveMusicSettings()
+        }
+    }
+
+    func moveMusicCue(_ id: String, to seconds: Double) {
+        guard !isExporting, duration > 0,
+              let index = musicCues.firstIndex(where: { $0.id == id }) else { return }
+        musicCues[index].time = min(max(0, seconds), max(0, duration - 0.01))
+        musicCues.sort { $0.time < $1.time }
+        suggestedBeatAlignment = nil
+        saveMusicSettings()
+    }
+
+    func removeMusicCue(_ id: String) {
+        guard !isExporting else { return }
+        musicCues.removeAll { $0.id == id }
+        saveMusicSettings()
+    }
+
+    func alignZoomToCue(_ id: String) {
+        guard let cue = musicCues.first(where: { $0.id == id }),
+              !isExporting else { return }
+        let cam = keyframes.map { CineoBeatKeyframe(time: $0.time, zoom: $0.zoom) }
+        suggestedBeatAlignment = CineoBeatSync.proposeToTime(
+            keyframes: cam, playhead: selectedTime, targetTime: cue.time, maxShift: 0.60)
+        if let suggestion = suggestedBeatAlignment {
+            musicStatus = String(format: "Cue %@: sposta il picco zoom da %.2f a %.2f s. Conferma BeatSync.",
+                cue.label, suggestion.from, suggestion.to)
+        } else {
+            musicStatus = "Non c'è un picco zoom compatibile entro ±0,60 s da questo cue."
+        }
     }
 
     /// Previewed, never applied automatically; defaults deliberately reject
@@ -302,14 +443,19 @@ final class CineoEditorModel: ObservableObject {
     func removeMusic() {
         guard !isExporting, !isGeneratingMusic else { return }
         musicPlayer?.pause()
+        musicOverlapPlayer?.pause()
         musicPlayer = nil
+        musicOverlapPlayer = nil
         musicAnalysisTask?.cancel()
+        originalActivityTask?.cancel()
         musicAnalysis = nil
         suggestedBeatAlignment = nil
         musicAsset = nil
         musicDisplayName = ""
         musicActualDuration = 0
         musicClip = CineoMusicClip()
+        musicCues = []
+        originalAudioActivity = []
         saveMusicSettings()
         musicStatus = "Traccia rimossa dal montaggio. Nessun file audio è stato cancellato."
     }
@@ -394,27 +540,7 @@ final class CineoEditorModel: ObservableObject {
     }
 
     private func synchronizeMusic(at videoTime: Double) {
-        guard let player = musicPlayer else { return }
-        guard let sourcePosition = musicClip.playbackPosition(
-                videoTime: videoTime, sourceDuration: effectiveSourceDuration,
-                videoDuration: duration, offset: musicSettings.offset) else {
-            player.pause()
-            return
-        }
-        let current = player.currentTime().seconds
-        if !current.isFinite || abs(current - sourcePosition) > 0.18 {
-            player.seek(to: CMTime(seconds: sourcePosition, preferredTimescale: 600),
-                        toleranceBefore: .zero, toleranceAfter: .zero)
-        }
-        let local = videoTime - musicSettings.offset
-        let playable = musicClipLength
-        let fadeIn = min(musicSettings.fadeIn, playable / 2)
-        let fadeOut = min(musicSettings.fadeOut, playable / 2)
-        let fadeUp = fadeIn > 0 ? min(1, local / fadeIn) : 1
-        let remaining = playable - local
-        let fadeDown = fadeOut > 0 ? min(1, remaining / fadeOut) : 1
-        player.volume = Float(musicSettings.volume * max(0, min(fadeUp, fadeDown)))
-        if player.rate == 0 { player.play() }
+        applyMusicTransport(at: videoTime, play: true)
     }
 
     var outputWidth: Int { portrait ? 1080 : 1920 }
@@ -438,7 +564,9 @@ final class CineoEditorModel: ObservableObject {
         pausePreviewPlayback()
         musicTask?.cancel()
         musicAnalysisTask?.cancel()
+        originalActivityTask?.cancel()
         musicPlayer = nil
+        musicOverlapPlayer = nil
         previewPlayer = nil
         previewFrameOutput = nil
         previewTask?.cancel()
@@ -623,7 +751,18 @@ final class CineoEditorModel: ObservableObject {
                 // Music changes do not silently start expensive generation.
                 // Keep the existing audio until the user explicitly regenerates it.
                 musicClip = CineoMusicClip(sourceIn: music.sourceIn ?? 0,
-                                           duration: music.clipDuration, loop: music.loop ?? false)
+                                           duration: music.clipDuration, loop: music.loop ?? false,
+                                           crossfade: music.crossfade)
+                if let duck = music.ducking {
+                    musicDucking = CineoDuckingSettings(enabled: duck.enabled,
+                        quietVolume: duck.quietVolume, thresholdDB: duck.thresholdDB,
+                        attack: duck.attack, release: duck.release)
+                }
+                if let cues = music.cues {
+                    musicCues = cues.map { CineoMusicCue(id: $0.id, time: $0.time, label: $0.label) }
+                        .sorted { $0.time < $1.time }
+                }
+                analyzeOriginalAudioForDucking()
                 suggestedBeatAlignment = nil
                 saveMusicSettings()
                 musicStatus = "Istruzioni musicali caricate. Premi Genera per applicarle alla traccia."
@@ -651,7 +790,10 @@ final class CineoEditorModel: ObservableObject {
         }
         pausePreviewPlayback()
         musicTask?.cancel()
+        musicAnalysisTask?.cancel()
+        originalActivityTask?.cancel()
         musicPlayer = nil
+        musicOverlapPlayer = nil
         previewPlayer = nil
         previewFrameOutput = nil
         previewTask?.cancel()
@@ -914,6 +1056,7 @@ final class CineoEditorModel: ObservableObject {
 
     func pausePreviewPlayback() {
         musicPlayer?.pause()
+        musicOverlapPlayer?.pause()
         guard isPreviewPlaying else { return }
         previewPlayer?.pause()
         isPreviewPlaying = false
@@ -978,6 +1121,7 @@ final class CineoEditorModel: ObservableObject {
         let exportMusicURL = musicURL
         let exportMusicSettings = musicSettings
         let exportMusicClip = musicClip
+        let exportMusicDucking = musicDucking
         let folder = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Cineo/Edited", isDirectory: true)
         do {
@@ -1011,7 +1155,8 @@ final class CineoEditorModel: ObservableObject {
                         video: videoOnly, original: url,
                         music: exportMusicURL,
                         settings: exportMusicURL == nil ? nil : exportMusicSettings,
-                        clip: exportMusicClip, destination: dest)
+                        clip: exportMusicClip, ducking: exportMusicDucking,
+                        destination: dest)
                 } else {
                     try FileManager.default.moveItem(at: videoOnly, to: dest)
                 }
@@ -1341,7 +1486,15 @@ private struct CineoInstructionsDialog: View {
                 offset: m.offset, fadeIn: m.fadeIn, fadeOut: m.fadeOut,
                 sourceIn: editor.musicClip.sourceIn,
                 clipDuration: editor.musicClip.duration,
-                loop: editor.musicClip.loop)
+                loop: editor.musicClip.loop,
+                crossfade: editor.musicClip.crossfade,
+                ducking: .init(enabled: editor.musicDucking.enabled,
+                    quietVolume: editor.musicDucking.quietVolume,
+                    thresholdDB: editor.musicDucking.thresholdDB,
+                    attack: editor.musicDucking.attack, release: editor.musicDucking.release),
+                cues: editor.musicCues.map {
+                    .init(id: $0.id, time: $0.time, label: $0.label)
+                })
             root["music"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(instruction))
             let data = try JSONSerialization.data(withJSONObject: root,
                                                   options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
@@ -1392,7 +1545,11 @@ private struct CineoInstructionsDialog: View {
         "bpm": 110, "duration": 45, "keyscale": "C major",
         "seed": -1, "volume": 0.4, "offset": 0,
         "fadeIn": 0.7, "fadeOut": 2.0,
-        "sourceIn": 0, "clipDuration": 20, "loop": false
+        "sourceIn": 0, "clipDuration": 20, "loop": false,
+        "crossfade": 0,
+        "ducking": {"enabled": false, "quietVolume": 0.28,
+                    "thresholdDB": -35, "attack": 0.12, "release": 0.45},
+        "cues": [{"id":"reveal","time":5.5,"label":"Reveal"}]
       }
     }
     """#

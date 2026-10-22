@@ -36,7 +36,7 @@ struct CineoMusicTimelineStrip: View {
                             context.fill(Path(roundedRect: clipRect, cornerRadius: 4),
                                          with: .color(CineoBrand.ocean.opacity(0.25)))
                             if let analysis = editor.musicAnalysis, analysis.sourceDuration > 0,
-                               let segments = try? editor.musicClip.segments(
+                               let segments = try? editor.musicClip.arrangedSegments(
                                     sourceDuration: editor.musicActualDuration > 0
                                         ? editor.musicActualDuration : analysis.sourceDuration,
                                     videoDuration: editor.duration, offset: offset) {
@@ -67,6 +67,13 @@ struct CineoMusicTimelineStrip: View {
                                 }
                                 context.stroke(accents, with: .color(.orange.opacity(0.85)), lineWidth: 1)
                             }
+                            var cues = Path()
+                            for cue in editor.musicCues {
+                                let x = size.width * CGFloat(cue.time / total)
+                                cues.move(to: CGPoint(x: x, y: 0))
+                                cues.addLine(to: CGPoint(x: x, y: size.height))
+                            }
+                            context.stroke(cues, with: .color(.yellow), style: StrokeStyle(lineWidth: 1.4, dash: [3, 2]))
                             let playheadX = max(0, min(size.width - 2,
                                 size.width * CGFloat(editor.selectedTime / total)))
                             var playhead = Path()
@@ -118,6 +125,26 @@ struct CineoMusicPanel: View {
 
     private var loopBinding: Binding<Bool> {
         Binding(get: { editor.musicClip.loop }, set: { editor.setMusicLoop($0) })
+    }
+
+    private var crossfadeBinding: Binding<Double> {
+        Binding(get: { editor.musicClip.crossfade ?? 0 },
+                set: { editor.setMusicCrossfade($0) })
+    }
+
+    private var duckingBinding: Binding<Bool> {
+        Binding(get: { editor.musicDucking.enabled },
+                set: { editor.setMusicDuckingEnabled($0) })
+    }
+
+    private var duckVolumeBinding: Binding<Double> {
+        Binding(get: { editor.musicDucking.quietVolume },
+                set: { editor.setMusicDuckingQuietVolume($0) })
+    }
+
+    private var duckThresholdBinding: Binding<Double> {
+        Binding(get: { editor.musicDucking.thresholdDB },
+                set: { editor.setMusicDuckingThreshold($0) })
     }
 
     private var maxPlayLength: Double {
@@ -240,6 +267,37 @@ struct CineoMusicPanel: View {
             }
             Toggle("Ripeti la traccia (loop)", isOn: loopBinding)
                 .disabled(editor.isExporting)
+            if editor.musicClip.loop {
+                HStack {
+                    Text("Crossfade loop").frame(width: 105, alignment: .leading)
+                    Slider(value: crossfadeBinding,
+                           in: 0...max(0.001, min(1.5,
+                               (editor.musicActualDuration - editor.musicClip.sourceIn) * 0.40)))
+                    Text(String(format: "%.2f s", editor.musicClip.crossfade ?? 0))
+                        .font(.caption.monospacedDigit()).frame(width: 60)
+                }
+                Text("Sovrappone due ripetizioni per evitare stacchi bruschi. Non altera l'audio originale.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Divider()
+            Toggle("Abbassa la musica durante l'audio originale", isOn: duckingBinding)
+                .disabled(editor.isExporting)
+            if editor.musicDucking.enabled {
+                HStack {
+                    Text("Volume ridotto").frame(width: 105, alignment: .leading)
+                    Slider(value: duckVolumeBinding, in: 0...1)
+                    Text("\(Int(editor.musicDucking.quietVolume * 100))%")
+                        .monospacedDigit().frame(width: 60)
+                }
+                HStack {
+                    Text("Soglia audio").frame(width: 105, alignment: .leading)
+                    Slider(value: duckThresholdBinding, in: -60 ... -15, step: 1)
+                    Text(String(format: "%.0f dB", editor.musicDucking.thresholdDB))
+                        .font(.caption.monospacedDigit()).frame(width: 60)
+                }
+                Text("Rileva l'attività audio originale, non distingue voce, musica e suoni di sistema.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             HStack {
                 Text("Volume").frame(width: 105, alignment: .leading)
                 Slider(value: value(\.volume), in: 0...1)
@@ -260,6 +318,42 @@ struct CineoMusicPanel: View {
                     .frame(width: 70)
                 Spacer()
             }.textFieldStyle(.roundedBorder)
+            Divider()
+            HStack {
+                Text("Cue musicali").font(.headline)
+                Spacer()
+                Button("Aggiungi al playhead") { editor.addMusicCueAtPlayhead() }
+                    .disabled(editor.isExporting)
+            }
+            Text("Segnaposto manuali per i momenti importanti del video. Non aggiungono suoni o modificano la musica.")
+                .font(.caption).foregroundStyle(.secondary)
+            if !editor.musicCues.isEmpty {
+                ForEach(editor.musicCues) { cue in
+                    HStack {
+                        Button(String(format: "%.2f s", cue.time)) { editor.scrub(cue.time) }
+                            .font(.caption.monospacedDigit())
+                        TextField("Nome cue", text: Binding(
+                            get: { editor.musicCues.first(where: { $0.id == cue.id })?.label ?? cue.label },
+                            set: { editor.renameMusicCue(cue.id, label: $0) }
+                        ))
+                        .textFieldStyle(.roundedBorder).font(.caption).frame(width: 112)
+                        TextField("s", value: Binding(
+                            get: { editor.musicCues.first(where: { $0.id == cue.id })?.time ?? cue.time },
+                            set: { editor.moveMusicCue(cue.id, to: $0) }
+                        ), format: .number.precision(.fractionLength(2)))
+                            .textFieldStyle(.roundedBorder).font(.caption)
+                            .frame(width: 65)
+                        Button("Qui") { editor.moveMusicCue(cue.id, to: editor.selectedTime) }
+                            .font(.caption)
+                        Spacer()
+                        Button("Allinea zoom") { editor.alignZoomToCue(cue.id) }
+                            .font(.caption)
+                        Button { editor.removeMusicCue(cue.id) } label: {
+                            Image(systemName: "xmark.circle")
+                        }.help("Rimuovi cue").disabled(editor.isExporting)
+                    }
+                }
+            }
             Divider()
             HStack {
                 Text("BeatSync").font(.headline)
