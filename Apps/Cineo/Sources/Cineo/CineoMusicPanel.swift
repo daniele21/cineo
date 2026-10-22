@@ -17,8 +17,9 @@ struct CineoMusicTimelineStrip: View {
                         Text(editor.musicDisplayName.isEmpty ? "Traccia musicale" : editor.musicDisplayName)
                             .font(.caption.weight(.semibold)).lineLimit(1)
                         Spacer()
-                        Text(String(format: "Inizio %.2f s · durata %.1f s",
-                                    editor.musicSettings.offset, editor.musicClipLength))
+                        Text(String(format: "Playhead %.2f s · inizio %.2f s · durata %.1f s",
+                                    editor.selectedTime, editor.musicSettings.offset,
+                                    editor.musicClipLength))
                             .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     }
                     GeometryReader { geo in
@@ -90,6 +91,23 @@ struct CineoMusicTimelineStrip: View {
                         .help("Trascina per spostare la traccia senza cambiare il tempo della sorgente.")
                     }
                     .frame(height: 28)
+                    GeometryReader { ruler in
+                        HStack(spacing: 0) {
+                            ForEach(0..<5, id: \.self) { i in
+                                Text(String(format: "%.1fs", editor.duration * Double(i) / 4))
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                if i != 4 { Spacer(minLength: 0) }
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { position in
+                            let fraction = max(0, min(1, Double(position.x / max(1, ruler.size.width))))
+                            editor.scrub(fraction * editor.duration)
+                        }
+                        .help("Clicca sul righello per spostare il playhead senza trascinare la musica")
+                    }
+                    .frame(height: 16)
                 }
                 Button { editor.showingMusic = true } label: {
                     Image(systemName: "slider.horizontal.3")
@@ -255,6 +273,19 @@ struct CineoMusicPanel: View {
                     .monospacedDigit().frame(width: 60)
                 Button("Inizia qui") { editor.setMusicStartAtPlayhead() }
             }
+            HStack(spacing: 8) {
+                Button("−0,1 s") { editor.nudgeMusicOffset(by: -0.1) }
+                    .help("Sposta l'inizio della musica indietro di 100 millisecondi")
+                Button("+0,1 s") { editor.nudgeMusicOffset(by: 0.1) }
+                    .help("Sposta l'inizio della musica avanti di 100 millisecondi")
+                Button("Allinea il primo accento al playhead") {
+                    editor.alignFirstMusicAccentToPlayhead()
+                }
+                .disabled(editor.musicAnalysis?.onsets.isEmpty != false || editor.isExporting)
+                Spacer()
+                Text("Marcatori arancioni = accenti · viola = cue")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }.controlSize(.small)
             HStack {
                 Text("Taglio sorgente").frame(width: 105, alignment: .leading)
                 Slider(value: sourceInBinding,
