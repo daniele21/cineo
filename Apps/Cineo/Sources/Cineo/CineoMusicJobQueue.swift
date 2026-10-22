@@ -16,6 +16,26 @@ final class CineoMusicJobQueue: ObservableObject {
     private let outputs: URL
     private var running: Task<Void, Never>?
     private let maxJobs = 50
+    private var shuttingDown = false
+    // App-owned coordinator installs the engine startup dependency before pump().
+    private var prepareEngine: (@MainActor () async throws -> Void)?
+
+    func configureEngine(_ prepare: @escaping @MainActor () async throws -> Void) {
+        prepareEngine = prepare
+    }
+
+    /// Preserve queued work but never revive a remote ID after an owned ACE
+    /// server has been stopped. Submitted jobs need explicit user retry.
+    func prepareForAppExit() {
+        shuttingDown = true
+        for i in jobs.indices where jobs[i].phase == .running {
+            jobs[i].phase = .interrupted
+            jobs[i].checkpoint = nil
+            jobs[i].status = "Generazione interrotta dall'uscita di Cineo. Riprova dalla coda."
+        }
+        save()
+        running?.cancel()
+    }
 
     init(root: URL? = nil) {
         let dir = root ?? FileManager.default.urls(
@@ -38,6 +58,10 @@ final class CineoMusicJobQueue: ObservableObject {
                     jobs[index].recoverAfterAppRestart(
                         outputExists: FileManager.default.fileExists(
                             atPath: jobs[index].destinationPath))
+                    // This release shuts down its private ACE server on app
+                    // exit or crash. Never automatically poll an unverified
+                    // /job ID against a new instance (or a foreign server).
+                    jobs[index].invalidateUnverifiedRemoteCheckpoint()
                 }
                 save()
             } catch {
@@ -68,6 +92,7 @@ final class CineoMusicJobQueue: ObservableObject {
     private func enqueue(kind: CineoMusicQueueJob.Kind, settings: CineoMusicSettings,
                          videoURL: URL, label: String, repaint: CineoACERepaintRequest?,
                          source: URL?) throws {
+        guard !shuttingDown else { throw CineoMusicError.unavailable("Cineo sta chiudendo.") }
         guard persistenceError == nil else {
             throw CineoMusicError.unavailable("Coda non disponibile: ripristina prima il file music-job-queue.json.")
         }
@@ -155,7 +180,7 @@ final class CineoMusicJobQueue: ObservableObject {
     }
 
     private func pump() {
-        guard persistenceError == nil, running == nil,
+        guard !shuttingDown, persistenceError == nil, running == nil,
               let next = jobs.last(where: { $0.phase == .queued }) else { return }
         activeID = next.id
         running = Task { [weak self] in await self?.execute(next.id) }
@@ -176,6 +201,11 @@ final class CineoMusicJobQueue: ObservableObject {
         save()
         let snapshot = jobs[i]
         do {
+            try await prepareEngine?()
+            try Task.checkCancellation()
+            guard jobs.first(where: { $0.id == id })?.phase == .running else {
+                throw CancellationError()
+            }
             let client = try CineoACEClient()
             let checkpoint: @Sendable (CineoACEJobCheckpoint) async throws -> Void = { [weak self] point in
                 guard let self else { throw CancellationError() }

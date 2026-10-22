@@ -8,7 +8,7 @@ import CineoMusic
 @MainActor
 final class CineoACEBackendController: ObservableObject {
     enum Phase: String {
-        case stopped, checking, missing, launching, ready, failed
+        case stopped, checking, missing, launching, ready, stopping, failed
     }
 
     @Published private(set) var phase: Phase = .stopped
@@ -19,7 +19,9 @@ final class CineoACEBackendController: ObservableObject {
 
     let downloader = CineoACEModelDownloader()
     private let locationKey = "Cineo.music.aceBackendDirectory"
+    // This Process represents the watchdog, which alone owns the ACE child.
     private var server: Process?
+    private var controlPipe: Pipe?
     private var outputPipe: Pipe?
     private var launchingTask: Task<Void, Never>?
 
@@ -41,7 +43,7 @@ final class CineoACEBackendController: ObservableObject {
     }
 
     var isReady: Bool { phase == .ready }
-    var isBusy: Bool { phase == .checking || phase == .launching }
+    var isBusy: Bool { phase == .checking || phase == .launching || phase == .stopping }
 
     var missingModels: [String] {
         installation?.unavailableModels() ?? CineoACEBackendInstallation.requiredModels
@@ -116,10 +118,18 @@ final class CineoACEBackendController: ObservableObject {
             phase = .launching
             detail = "Avvio ACE-Step su 127.0.0.1:8080…"
             recentLog = ""
+            guard let helper = Bundle.main.executableURL?
+                .deletingLastPathComponent().appendingPathComponent("CineoACEWatchdog"),
+                  FileManager.default.isExecutableFile(atPath: helper.path) else {
+                throw CineoMusicError.unavailable(
+                    "CineoACEWatchdog non è presente nel bundle firmato. Ricompila Cineo con scripts/build-cineo-clt.sh.")
+            }
             let process = Process()
-            process.executableURL = installation.executableURL
-            process.arguments = installation.launchArguments
+            process.executableURL = helper
+            process.arguments = [installation.executableURL.path] + installation.launchArguments
             process.currentDirectoryURL = installation.root
+            let liveness = Pipe()
+            process.standardInput = liveness
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = pipe
@@ -136,9 +146,12 @@ final class CineoACEBackendController: ObservableObject {
                     guard let self, self.server === terminated else { return }
                     self.outputPipe?.fileHandleForReading.readabilityHandler = nil
                     self.outputPipe = nil
+                    self.controlPipe?.fileHandleForWriting.closeFile()
+                    self.controlPipe = nil
                     self.server = nil
                     self.isManaged = false
-                    if self.phase == .stopped {
+                    if self.phase == .stopping {
+                        self.phase = .stopped
                         self.detail = "Motore ACE-Step arrestato."
                     } else {
                         self.phase = .failed
@@ -147,10 +160,11 @@ final class CineoACEBackendController: ObservableObject {
                 }
             }
             try process.run()
+            controlPipe = liveness
             server = process
             isManaged = true
             launchingTask = Task { [weak self] in
-                for attempt in 0..<30 {
+                for attempt in 0..<90 {
                     guard let self else { return }
                     if Task.isCancelled { return }
                     do {
@@ -165,30 +179,91 @@ final class CineoACEBackendController: ObservableObject {
                             return
                         }
                     }
-                    self.detail = "Avvio motore locale, verifica \(attempt + 1)/30 (non è la percentuale di generazione)…"
+                    self.detail = "Avvio motore locale, verifica \(attempt + 1)/90 (non è la percentuale di generazione)…"
                     try? await Task.sleep(for: .seconds(1))
                 }
                 self?.phase = .failed
-                self?.detail = "ACE-Step non risponde dopo 30 s. Consulta i log; il processo può essere ancora attivo."
+                self?.detail = "ACE-Step non risponde dopo 90 s. Consulta i log; il processo può essere ancora attivo."
             }
         } catch {
             outputPipe?.fileHandleForReading.readabilityHandler = nil
             outputPipe = nil
+            controlPipe?.fileHandleForWriting.closeFile()
+            controlPipe = nil
             phase = .failed
             detail = "Avvio ACE-Step fallito: \(error.localizedDescription)"
         }
     }
 
+    /// EOF on the ownership pipe makes the watchdog terminate and reap ACE.
+    /// Do not signal the watchdog directly: that could orphan its child.
     func stop() {
         launchingTask?.cancel()
         launchingTask = nil
-        guard let owned = server, owned.isRunning else {
+        guard server?.isRunning == true else {
             detail = "Server non gestito da Cineo: non lo arresto."
             return
         }
-        phase = .stopped
-        detail = "Arresto del motore ACE-Step avviato da Cineo…"
-        owned.terminate()
+        phase = .stopping
+        detail = "Arresto controllato del motore ACE-Step…"
+        controlPipe?.fileHandleForWriting.closeFile()
+        controlPipe = nil
+    }
+
+    /// Wait for the watchdog, never for a guessed PID or a foreign port owner.
+    func shutdown() async {
+        stop()
+        for _ in 0..<100 {
+            if server?.isRunning != true { return }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        if server?.isRunning == true {
+            detail = "Il watchdog sta ancora completando l'arresto del motore."
+            NSLog("Cineo ACE watchdog did not exit within 10 s")
+        }
+    }
+
+    /// Called by the durable job queue before a new remote submission.
+    func ensureReady() async throws {
+        // An idle timeout might have closed the watchdog liveness pipe just
+        // before a new job arrived. Wait for the *previous* supervisor's
+        // termination handler to release ownership before starting a new one.
+        if phase == .stopping && server != nil {
+            for _ in 0..<100 {
+                if server == nil { break }
+                try Task.checkCancellation()
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            if server != nil {
+                throw CineoMusicError.unavailable("Il precedente motore ACE-Step è ancora in arresto.")
+            }
+        }
+        if isReady {
+            do { try await ping(); return } catch { /* stale readiness */ }
+        }
+        if !isBusy && server?.isRunning != true {
+            do {
+                try await ping()
+                phase = .ready
+                isManaged = false
+                detail = "ACE-Step esterno pronto (non gestito da Cineo)."
+                return
+            } catch {
+                start()
+            }
+        }
+        for _ in 0..<200 {
+            try Task.checkCancellation()
+            if isReady { try await ping(); return }
+            if phase == .failed || phase == .missing {
+                throw CineoMusicError.unavailable(detail)
+            }
+            if server?.isRunning != true && !isBusy {
+                throw CineoMusicError.unavailable(detail)
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        throw CineoMusicError.unavailable("ACE-Step non è diventato pronto entro 100 secondi.")
     }
 
     private func ping() async throws {

@@ -76,6 +76,11 @@ trap 'rm -rf "$STAGE_DIR"' EXIT
 STAGE="$STAGE_DIR/Cineo Dev.app"
 mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
 cp "$BIN_DIR/Cineo" "$STAGE/Contents/MacOS/Cineo"
+# The watchdog is a tiny signed child-process supervisor. It is compiled
+# with the same Apple Command Line Tools as Cineo, never Xcode.app.
+swiftc -O "$ROOT/Tools/CineoACEWatchdog/main.swift" \
+  -o "$STAGE/Contents/MacOS/CineoACEWatchdog"
+[[ -x "$STAGE/Contents/MacOS/CineoACEWatchdog" ]] || exit 3
 # Brand kit files are committed as base64 text so the GitHub connector and
 # CLT-only checkout preserve the original supplied binary .icns and PNG bytes.
 # Decode into the one staged app (never create another app identity).
@@ -134,12 +139,15 @@ plutil -lint "$STAGE/Contents/Info.plist"
 # Persistent local signing avoids build-specific designated requirements.
 # A Developer ID certificate and notarization remain release-only concerns.
 if [[ "$SIGNING_MODE" == "persistent" ]]; then
-  codesign --force --sign "$SIGNING_IDENTITY" --timestamp=none \
-    --keychain "${CINEO_SIGNING_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}" "$STAGE"
+  for target in "$STAGE/Contents/MacOS/CineoACEWatchdog" "$STAGE"; do
+    codesign --force --sign "$SIGNING_IDENTITY" --timestamp=none \
+      --keychain "${CINEO_SIGNING_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}" "$target"
+  done
 else
+  codesign --force --sign - --timestamp=none "$STAGE/Contents/MacOS/CineoACEWatchdog"
   codesign --force --sign - --timestamp=none "$STAGE"
 fi
-codesign --verify --strict --verbose=2 "$STAGE"
+codesign --verify --deep --strict --verbose=2 "$STAGE"
 DESIGNATED_REQUIREMENT="$(codesign --display --requirements - "$STAGE" 2>&1)"
 if [[ "$SIGNING_MODE" == "persistent" ]]; then
   if ! grep -q 'designated =>' <<< "$DESIGNATED_REQUIREMENT" || \

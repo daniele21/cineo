@@ -7,6 +7,8 @@ on:
       - 'Packages/CineoScene/**'
       - 'Packages/CineoMusic/**'
       - 'Packages/CineoAudio/**'
+      - 'Tools/CineoACEWatchdog/**'
+      - 'scripts/test-cineo-engine-lifecycle.sh'
       - '.github/workflows/cineo-studio-clt-smoke.yml'
   workflow_dispatch:
 
@@ -14,6 +16,17 @@ permissions:
   contents: read
 
 jobs:
+  watchdog-lifecycle:
+    name: ACE child supervision (quit and forced crash)
+    runs-on: macos-26
+    timeout-minutes: 10
+    env:
+      DEVELOPER_DIR: /Library/Developer/CommandLineTools
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify owner-pipe closure and SIGKILL owner cleanup
+        run: bash scripts/test-cineo-engine-lifecycle.sh
+
   geometry:
     name: Pure Swift scene geometry tests
     runs-on: ubuntu-latest

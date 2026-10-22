@@ -247,7 +247,7 @@ struct CineoMusicPanel: View {
                         CineoMusicQueueButton(editor: editor)
                         Spacer()
                     }
-                    Text("La generazione prosegue nella coda anche se chiudi questa finestra o cambi video. Quando è pronta, applica la traccia dalla coda.")
+                    Text("Il motore si avvia automaticamente quando accodi una traccia e si spegne dopo 10 minuti di inattività. La generazione continua se cambi video o chiudi Music Director, finché Cineo resta aperto.")
                         .font(.caption2).foregroundStyle(.secondary)
                     Text(editor.musicStatus).font(.caption).foregroundStyle(.secondary)
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)

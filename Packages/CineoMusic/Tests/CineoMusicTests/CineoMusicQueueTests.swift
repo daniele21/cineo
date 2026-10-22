@@ -5,6 +5,28 @@ import XCTest
 final class CineoMusicQueueTests: XCTestCase {
     let settings = CineoMusicSettings()
 
+    func testRecoveredOutputCanCompleteInterruptedQuit() throws {
+        var job = try CineoMusicQueueJob(kind: .generation,
+            originVideoPath: "/tmp/video.mp4", title: "test",
+            settings: CineoMusicSettings(), destinationPath: "/tmp/result.wav")
+        job.phase = .interrupted
+        job.recoverAfterAppRestart(outputExists: true)
+        XCTAssertEqual(job.phase, .ready)
+        XCTAssertNil(job.checkpoint)
+    }
+
+    func testCheckpointMustNotBeAutomaticallyReusedAfterAppRestart() throws {
+        var job = try CineoMusicQueueJob(kind: .generation,
+            originVideoPath: "/tmp/video.mp4", title: "test",
+            settings: CineoMusicSettings(), destinationPath: "/tmp/result.wav")
+        job.phase = .running
+        job.checkpoint = try CineoACEJobCheckpoint(stage: .synth, remoteID: "abc123")
+        job.recoverAfterAppRestart(outputExists: false)
+        job.invalidateUnverifiedRemoteCheckpoint()
+        XCTAssertEqual(job.phase, .interrupted)
+        XCTAssertNil(job.checkpoint)
+    }
+
     func testQueueJobsRoundTripAndResumeKnownServerJob() throws {
         var job = try CineoMusicQueueJob(
             kind: .generation, originVideoPath: "/tmp/video.mp4",
