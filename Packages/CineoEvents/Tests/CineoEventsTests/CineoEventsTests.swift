@@ -15,6 +15,21 @@ struct CineoEventsTests {
         #expect(secondaryDisplay.normalize(globalX: 500, globalY: 491) == nil)
     }
 
+    @Test func standaloneRecordingSidecarRoundTrip() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let video = dir.appendingPathComponent("demo.mp4")
+        let original = try CineoPointerSidecar(events: [
+            .init(sourceSeconds: 1.2, x: 0.25, y: 0.9, kind: .leftClick)
+        ])
+        let storage = CineoPointerRecordingStore()
+        try storage.save(original, for: video)
+        #expect(try storage.load(for: video) == original)
+        #expect(storage.sidecarURL(for: video).lastPathComponent == "demo.pointer-events.json")
+    }
+
     @Test func strictMouseSchemaAndOrdering() throws {
         let ok = CineoPointerEvent(sourceSeconds: 2, x: 0.2, y: 0.7, kind: .leftClick)
         let sidecar = try CineoPointerSidecar(events: [ok])

@@ -117,6 +117,7 @@ cat > "$STAGE/Contents/Info.plist" <<'EOF'
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>Cineo records your microphone only when you explicitly enable microphone capture.</string>
   <key>NSScreenCaptureUsageDescription</key>
   <string>Cineo records your selected screen only when you click Record. Videos remain on this Mac.</string>
 </dict></plist>

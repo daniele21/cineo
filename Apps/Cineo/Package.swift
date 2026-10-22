@@ -9,14 +9,18 @@ let package = Package(
         .package(path: "../../Packages/CineoScene"),
         .package(path: "../../Packages/CineoProject"),
         .package(path: "../../Packages/CineoMusic"),
-        .package(path: "../../Packages/CineoAudio")
+        .package(path: "../../Packages/CineoAudio"),
+        .package(path: "../../Packages/CineoEvents"),
+        .package(path: "../../Packages/CineoDirector")
     ],
     targets: [
         .executableTarget(name: "Cineo", dependencies: [
             .product(name: "CineoScene", package: "CineoScene"),
             .product(name: "CineoProject", package: "CineoProject"),
             .product(name: "CineoMusic", package: "CineoMusic"),
-            .product(name: "CineoAudio", package: "CineoAudio")
+            .product(name: "CineoAudio", package: "CineoAudio"),
+            .product(name: "CineoEvents", package: "CineoEvents"),
+            .product(name: "CineoDirector", package: "CineoDirector")
         ])
     ]
 )

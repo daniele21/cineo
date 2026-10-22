@@ -29,3 +29,14 @@ This specification gates G1 (real frame rendering), G2 (genuine pointer suggesti
 
 ## Evidence collection
 Record Git SHA, macOS version/host, Swift/CLT version, sanitized job phase progress, clip name alias, source/output SHA, source/output geometry/duration, 3 sample-frame image hashes, failure code and elapsed time. No private desktop video in CI artifacts without explicit opt-in. For reproducible CI use generated synthetic fixtures.
+
+
+## 2026-10-22 implementation gates (PR #67)
+
+- Collect clicks **only** when explicitly opted in. Never collect text, clipboard contents or keystroke fields.
+- Timestamp against first actual ScreenCaptureKit sample, not Record button press. Out-of-range/unknown-anchor events should not be silently projected onto the video.
+- Ensure screen origin and high-DPI scaling on a secondary display are correct and verify saved sidecar events after project import.
+- Reject/ignore absent pointer metadata: no invented click or zoom. Existing saved camera edits remain until the user explicitly applies suggestions.
+- A telemetry metadata failure must not invalidate a successful H.264 recording.
+- Record both system and microphone audio only when selected; if denied, preserve the existing recording flow with an actionable explanation.
+- Observe elapsed-time, actual output FPS, A/V drift and visual preview/export match on a real Apple Silicon Mac. Do not claim these passed based only on synthetic CI.

@@ -10,6 +10,8 @@ import CineoScene
 import CineoProject
 import CineoMusic
 import CineoAudio
+import CineoEvents
+import CineoDirector
 import CryptoKit
 
 @MainActor
@@ -44,6 +46,12 @@ final class CineoEditorModel: ObservableObject {
     @Published var exportProgress: Double = 0
     @Published var outputURL: URL?
     @Published var keyframes: [CineoCameraKeyframe] = []
+    @Published var autoEditPreset: CameraPreset = .balanced
+    @Published private(set) var hasPointerEvents = false
+    @Published private(set) var autoEditShotCount = 0
+    @Published private(set) var autoEditPreviewEnabled = false
+    private var pointerSidecar: CineoPointerSidecar?
+    private var autoEditCamera: [CineoCameraKeyframe] = []
     @Published private(set) var importedActionMarkers: [ImportedActionMarker] = []
     @Published var showingInstructions = false
     @Published var showingMusic = false
@@ -763,8 +771,72 @@ final class CineoEditorModel: ObservableObject {
         return CineoScenePlan(
             outputWidth: outputWidth, outputHeight: outputHeight,
             paddingFraction: padding, background: color,
-            camera: keyframes.sorted { $0.time < $1.time }
+            camera: (autoEditPreviewEnabled ? autoEditCamera : keyframes)
+                .sorted { $0.time < $1.time }
         )
+    }
+
+    func proposeAutoEdit() {
+        guard sourceURL != nil, let pointerSidecar else {
+            status = "Nessun click registrato. Per Auto Edit, abilita «Registra click» prima della cattura."
+            return
+        }
+        let draft = CineoAutoEditPlanner().propose(
+            sidecar: pointerSidecar, duration: duration, preset: autoEditPreset)
+        autoEditShotCount = draft.shots.count
+        autoEditCamera = draft.keyframes
+        autoEditPreviewEnabled = !draft.isEmpty
+        if draft.isEmpty {
+            status = "Nessuno zoom utile rilevato: il video rimane invariato."
+        } else {
+            status = "Anteprima non salvata: \(draft.shots.count) proposte di Smart Camera. Premi «Applica zoom» per confermare."
+        }
+        refreshPreview()
+    }
+
+    func discardAutoEditProposal() {
+        autoEditPreviewEnabled = false
+        autoEditCamera = []
+        autoEditShotCount = 0
+        refreshPreview()
+    }
+
+    func applyAutoEditProposal() {
+        guard autoEditPreviewEnabled, !autoEditCamera.isEmpty else { return }
+        if !keyframes.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "Sostituire gli zoom manuali?"
+            alert.informativeText = "Gli zoom suggeriti sostituiranno i keyframe esistenti solo con la tua conferma. La registrazione originale rimane invariata."
+            alert.addButton(withTitle: "Applica zoom")
+            alert.addButton(withTitle: "Annulla")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        let previous = keyframes
+        let applied = autoEditCamera
+        autoEditPreviewEnabled = false
+        keyframes = applied
+        guard savePlan() else {
+            keyframes = previous
+            status = "Salvataggio degli zoom fallito. Modifiche manuali ripristinate."
+            return
+        }
+        autoEditCamera = []
+        importedActionMarkers = []
+        status = "Smart Camera applicata: \(autoEditShotCount) sequenze; ogni keyframe resta modificabile."
+        refreshPreview()
+    }
+
+    private func loadPointerEvents(for original: URL, source: URL, project: URL?) {
+        pointerSidecar = nil
+        if let project {
+            pointerSidecar = try? CineoPointerSidecarStore().load(projectURL: project)
+        } else {
+            pointerSidecar = try? CineoPointerRecordingStore().load(for: original)
+        }
+        hasPointerEvents = !(pointerSidecar?.events.isEmpty ?? true)
+        autoEditCamera = []
+        autoEditShotCount = 0
+        autoEditPreviewEnabled = false
     }
 
     func open(_ url: URL) async {
@@ -786,6 +858,9 @@ final class CineoEditorModel: ObservableObject {
         sourceURL = nil
         projectURL = nil
         outputURL = nil
+        pointerSidecar = nil
+        hasPointerEvents = false
+        autoEditPreviewEnabled = false
         do {
             var mediaURL = url
             var openedProject: CineoManifest?
@@ -852,6 +927,8 @@ final class CineoEditorModel: ObservableObject {
             sourceURL = mediaURL
             projectURL = openedProject == nil ? nil : url
             restorePlan()
+            loadPointerEvents(for: url, source: mediaURL,
+                              project: openedProject == nil ? nil : url)
             restoreMusicSettings()
             status = projectURL == nil
                 ? "Regola lo zoom o scegli un punto. Puoi salvare tutto in un progetto Cineo."
@@ -894,6 +971,15 @@ final class CineoEditorModel: ObservableObject {
                     let copied = location.appendingPathComponent("Media").appendingPathComponent(musicAsset.fileName)
                     try FileManager.default.copyItem(at: originalMusic, to: copied)
                 }
+                if let pointerSidecar {
+                    do {
+                        try CineoPointerSidecarStore().save(pointerSidecar, projectURL: location)
+                    } catch {
+                        // Click telemetry is optional. A valid project and its
+                        // imported source media must not be discarded for it.
+                        status = "Progetto salvato senza telemetria click: \(error.localizedDescription)"
+                    }
+                }
                 musicQueue.relinkVideo(from: source, to: savedSource)
                 projectURL = location
                 sourceURL = savedSource
@@ -913,6 +999,7 @@ final class CineoEditorModel: ObservableObject {
     /// scene is evaluated by the exact same compositor used by MP4 export.
     func importInstructions(from url: URL) {
         guard sourceURL != nil, !isExporting, !isSavingProject else { return }
+        discardAutoEditProposal()
         do {
             let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
             let length = (attributes[.size] as? NSNumber)?.intValue ?? -1
@@ -1015,6 +1102,9 @@ final class CineoEditorModel: ObservableObject {
         preview = nil
         sourceURL = nil
         projectURL = nil
+        pointerSidecar = nil
+        hasPointerEvents = false
+        discardAutoEditProposal()
         status = ""
     }
 
@@ -1039,11 +1129,13 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func changeZoom(_ newZoom: Double) {
+        discardAutoEditProposal()
         zoom = min(2.5, max(1, newZoom))
         saveKeyframe()
     }
 
     func changeFocus(x: Double? = nil, y: Double? = nil) {
+        discardAutoEditProposal()
         if let x { focusX = min(1, max(0, x)) }
         if let y { focusY = min(1, max(0, y)) }
         // In Assisted mode, picking a target is not an edit yet: only the
@@ -1072,6 +1164,7 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func applySuggestedZoom() {
+        discardAutoEditProposal()
         let at = selectedTime
         let start = max(0, at - 0.45)
         let peak = at + 0.40
@@ -1101,6 +1194,7 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func removeNearestKeyframe() {
+        discardAutoEditProposal()
         guard let index = keyframes.indices.min(by: {
             abs(keyframes[$0].time - selectedTime) < abs(keyframes[$1].time - selectedTime)
         }), abs(keyframes[index].time - selectedTime) <= 0.40 else {
@@ -1115,6 +1209,7 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func resetCamera() {
+        discardAutoEditProposal()
         keyframes = []
         importedActionMarkers = []
         zoom = 1; focusX = 0.5; focusY = 0.5
@@ -1124,6 +1219,7 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func updateStyle() {
+        discardAutoEditProposal()
         pausePreviewPlayback()
         savePlan()
         refreshPreview()
@@ -1180,7 +1276,9 @@ final class CineoEditorModel: ObservableObject {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true
             )
-            let data = try JSONEncoder().encode(currentPlan)
+            var saved = currentPlan
+            saved.camera = keyframes.sorted { $0.time < $1.time }
+            let data = try JSONEncoder().encode(saved)
             try data.write(to: url, options: .atomic)
             return true
         } catch {
@@ -1331,6 +1429,10 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func export() {
+        guard !autoEditPreviewEnabled else {
+            status = "Applica oppure annulla le proposte Auto Edit prima dell'export."
+            return
+        }
         guard let url = sourceURL, !isExporting else { return }
         pausePreviewPlayback()
         let plan = currentPlan
@@ -1646,10 +1748,31 @@ struct CineoManualEditorView: View {
                         { editor.padding },
                         { editor.padding = $0; editor.updateStyle() }
                     ), in: 0...0.25)
+                    Divider()
+                    Text("Smart Camera · Auto Edit").font(.headline)
+                    Picker("Intensità", selection: $editor.autoEditPreset) {
+                        ForEach(CameraPreset.allCases, id: \.self) { preset in
+                            Text(preset.displayName).tag(preset)
+                        }
+                    }
+                    Button("Genera proposte dai click") { editor.proposeAutoEdit() }
+                        .disabled(!editor.hasPointerEvents || editor.isExporting)
+                    if editor.autoEditPreviewEnabled {
+                        Text("\(editor.autoEditShotCount) zoom suggeriti. La preview è temporanea, non ha modificato il progetto.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Button("Applica zoom") { editor.applyAutoEditProposal() }
+                                .buttonStyle(.borderedProminent)
+                            Button("Annulla") { editor.discardAutoEditProposal() }
+                        }
+                    } else if !editor.hasPointerEvents {
+                        Text("Nessuna telemetria click: registra un nuovo video abilitando l'opzione nella dashboard.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                     if editor.mode == .assisted {
                         Divider()
                         Text("Assistito").font(.headline)
-                        Text("Seleziona un punto nell'anteprima: Cineo crea un'entrata, una pausa e un'uscita. Non analizza ancora automaticamente i click.")
+                        Text("Seleziona un punto nell'anteprima e crea uno zoom manualmente. I suggerimenti automatici si trovano in Smart Camera.")
                             .font(.caption).foregroundStyle(.secondary)
                         Button("Suggerisci zoom qui") { editor.applySuggestedZoom() }
                     }
