@@ -1,12 +1,17 @@
 import SwiftUI
 import CineoMusic
 
+@MainActor
+private final class CineoMusicPopoverState: ObservableObject {
+    @Published var showingQueue = false
+}
+
 /// Shown in both the main video editor and Music Director. This observes the
 /// application-owned queue, not the sheet lifecycle.
 struct CineoMusicQueueButton: View {
     @ObservedObject var editor: CineoEditorModel
     @ObservedObject var queue: CineoMusicJobQueue
-    @State private var showingQueue = false
+    @StateObject private var popover = CineoMusicPopoverState()
 
     init(editor: CineoEditorModel) {
         self.editor = editor
@@ -15,7 +20,7 @@ struct CineoMusicQueueButton: View {
 
     var body: some View {
         Button {
-            showingQueue.toggle()
+            popover.showingQueue.toggle()
         } label: {
             HStack(spacing: 6) {
                 if queue.activeCount > 0 { ProgressView().controlSize(.mini) }
@@ -28,7 +33,7 @@ struct CineoMusicQueueButton: View {
                 }
             }.font(.caption)
         }
-        .popover(isPresented: $showingQueue, arrowEdge: .bottom) {
+        .popover(isPresented: $popover.showingQueue, arrowEdge: .bottom) {
             CineoMusicQueueContents(editor: editor, queue: queue)
                 .frame(width: 490, height: 320)
                 .padding(12)
