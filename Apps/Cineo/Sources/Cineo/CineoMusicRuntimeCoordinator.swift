@@ -30,8 +30,9 @@ final class CineoMusicRuntimeCoordinator {
         idleTask?.cancel()
         idleTask = nil
         guard !queue.hasWork, backend.isManaged, backend.isReady else { return }
+        let timeout = idleSeconds
         idleTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(idleSeconds))
+            try? await Task.sleep(for: .seconds(timeout))
             guard !Task.isCancelled, let self, !self.queue.hasWork,
                   self.backend.isManaged, self.backend.isReady else { return }
             self.backend.stop()
