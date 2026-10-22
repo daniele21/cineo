@@ -40,6 +40,7 @@ public struct CineoInstructionDocument: Codable, Sendable {
         public let duckingEnabled: Bool?
         public let duckingLevel: Double?
         public let duckingThreshold: Double?
+        public let duckingMode: String?
         public let cues: [Cue]?
 
         public struct Cue: Codable, Sendable {
@@ -47,9 +48,14 @@ public struct CineoInstructionDocument: Codable, Sendable {
             public let at: Double
             public let kind: String
             public let label: String
+            public let soundEnabled: Bool?
+            public let soundVolume: Double?
 
-            public init(id: String, at: Double, kind: String, label: String = "") {
+            public init(id: String, at: Double, kind: String, label: String = "",
+                        soundEnabled: Bool? = nil, soundVolume: Double? = nil) {
                 self.id = id; self.at = at; self.kind = kind; self.label = label
+                self.soundEnabled = soundEnabled
+                self.soundVolume = soundVolume
             }
         }
 
@@ -60,7 +66,8 @@ public struct CineoInstructionDocument: Codable, Sendable {
                     sourceIn: Double? = nil, clipDuration: Double? = nil,
                     loop: Bool? = nil, loopCrossfade: Double? = nil,
                     duckingEnabled: Bool? = nil, duckingLevel: Double? = nil,
-                    duckingThreshold: Double? = nil, cues: [Cue]? = nil) {
+                    duckingThreshold: Double? = nil,
+                    duckingMode: String? = nil, cues: [Cue]? = nil) {
             self.type = type
             self.caption = caption
             self.bpm = bpm
@@ -78,6 +85,7 @@ public struct CineoInstructionDocument: Codable, Sendable {
             self.duckingEnabled = duckingEnabled
             self.duckingLevel = duckingLevel
             self.duckingThreshold = duckingThreshold
+            self.duckingMode = duckingMode
             self.cues = cues
         }
 
@@ -101,7 +109,8 @@ public struct CineoInstructionDocument: Codable, Sendable {
                   duckingLevel == nil || (duckingLevel!.isFinite &&
                                           (0...1).contains(duckingLevel!)),
                   duckingThreshold == nil || (duckingThreshold!.isFinite &&
-                                              (0.01...1).contains(duckingThreshold!))
+                                              (0.01...1).contains(duckingThreshold!)),
+                  duckingMode == nil || ["anyAudio", "likelySpeech"].contains(duckingMode!)
                   else {
                 throw CineoInstructionError.invalid("music: valori mancanti o fuori intervallo.")
             }
@@ -115,7 +124,9 @@ public struct CineoInstructionDocument: Codable, Sendable {
                           seen.insert(cue.id).inserted,
                           cue.at.isFinite, cue.at >= 0, cue.at < videoDuration,
                           ["hit", "crescendo", "transition"].contains(cue.kind),
-                          cue.label.utf8.count <= 80 else {
+                          cue.label.utf8.count <= 80,
+                          cue.soundVolume == nil || (cue.soundVolume!.isFinite &&
+                                                     (0...1).contains(cue.soundVolume!)) else {
                         throw CineoInstructionError.invalid("music.cues: marcatore non valido.")
                     }
                 }
@@ -206,13 +217,14 @@ public struct CineoInstructionDocument: Codable, Sendable {
                                        "seed", "volume", "offset", "fadeIn", "fadeOut",
                                        "sourceIn", "clipDuration", "loop",
                                        "loopCrossfade", "duckingEnabled", "duckingLevel",
-                                       "duckingThreshold", "cues"], at: "music")
+                                       "duckingThreshold", "duckingMode", "cues"], at: "music")
             if let rawCues = music["cues"] {
                 guard let cues = rawCues as? [[String: Any]], cues.count <= 100 else {
                     throw CineoInstructionError.invalid("music.cues: usare un array di oggetti (max 100).")
                 }
                 for (index, cue) in cues.enumerated() {
-                    try fields(cue, allowed: ["id", "at", "kind", "label"],
+                    try fields(cue, allowed: ["id", "at", "kind", "label",
+                                              "soundEnabled", "soundVolume"],
                                at: "music.cues[\(index)]")
                 }
             }
