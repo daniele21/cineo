@@ -53,6 +53,12 @@ struct CineoMusicQueueContents: View {
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Divider()
+            if let error = queue.persistenceError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
             if queue.jobs.isEmpty {
                 ContentUnavailableView("Nessuna generazione in coda",
                     systemImage: "music.note",
