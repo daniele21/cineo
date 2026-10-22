@@ -35,7 +35,7 @@ public struct CineoMusicQueueJob: Codable, Equatable, Identifiable, Sendable {
     }
     public let id: UUID
     public let kind: Kind
-    public let originVideoPath: String
+    public var originVideoPath: String
     public let title: String
     public let settings: CineoMusicSettings
     public let repaint: CineoACERepaintRequest?
@@ -82,7 +82,11 @@ public struct CineoMusicQueueJob: Codable, Equatable, Identifiable, Sendable {
     }
 
     public mutating func recoverAfterAppRestart(outputExists: Bool) {
-        if phase == .running {
+        if phase == .running && outputExists {
+            phase = .ready
+            checkpoint = nil
+            status = "Traccia generata recuperata dopo la riapertura."
+        } else if phase == .running {
             if checkpoint != nil {
                 status = "Ripresa monitoraggio ACE-Step dopo riapertura…"
                 phase = .queued
