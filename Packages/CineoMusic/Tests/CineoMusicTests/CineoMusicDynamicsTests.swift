@@ -68,6 +68,16 @@ final class CineoMusicDynamicsTests: XCTestCase {
                 videoDuration: 15, offset: 0).count, 3)
     }
 
+    func testManualCueAlignmentRequiresOrderedCameraPeak() {
+        let keys = [CineoBeatKeyframe(time: 1, zoom: 1),
+                    CineoBeatKeyframe(time: 2, zoom: 1.5),
+                    CineoBeatKeyframe(time: 2.4, zoom: 1.5)]
+        XCTAssertEqual(CineoBeatSync.proposeToTime(keyframes: keys, playhead: 2,
+                                                    targetTime: 2.25)?.to, 2.25)
+        XCTAssertNil(CineoBeatSync.proposeToTime(keyframes: keys, playhead: 2,
+                                                 targetTime: 2.37))
+    }
+
     func testCueAndSettingsRejectInvalidValues() {
         XCTAssertNoThrow(try CineoMusicCue(time: 2).validate(videoDuration: 3))
         XCTAssertThrowsError(try CineoMusicCue(time: 3).validate(videoDuration: 3))
