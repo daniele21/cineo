@@ -35,6 +35,8 @@ public struct CineoACEClient: Sendable {
     /// atomically only after receiving a valid WAV payload.
     @discardableResult
     public func generate(settings: CineoMusicSettings, destination: URL,
+                         resumingAt: CineoACEJobCheckpoint? = nil,
+                         onCheckpoint: @escaping @Sendable (CineoACEJobCheckpoint) async -> Void = { _ in },
                          onStatus: @escaping @Sendable (String) -> Void = { _ in }) async throws -> URL {
         try settings.validate()
         guard destination.isFileURL, destination.pathExtension.lowercased() == "wav",
@@ -44,21 +46,40 @@ public struct CineoACEClient: Sendable {
         onStatus("Connessione al motore ACE-Step…")
         try await healthCheck()
         let initial = try settings.aceRequest()
-        onStatus("ACE-Step: preparazione musicale (LM interno)…")
-        let lm = try await submit("/lm", data: initial)
-        var activeJob = lm
+        guard resumingAt == nil || resumingAt?.stage != .repaint else {
+            throw CineoMusicError.invalid("Checkpoint repaint non utilizzabile per generazione.")
+        }
+        var activeJob: String?
         do {
-            try await waitForJob(lm)
-            let (lmData, _) = try await send(path: "/job", method: "GET",
-                                              query: ["id": lm, "result": "1"])
-            let items = try JSONSerialization.jsonObject(with: lmData) as? [[String: Any]]
-            guard let first = items?.first else {
-                throw CineoMusicError.server("ACE-Step /lm non ha restituito codici musicali.")
+            let synth: String
+            if let resume = resumingAt, resume.stage == .synth {
+                synth = resume.remoteID
+                activeJob = synth
+                onStatus("ACE-Step: riprendo la sintesi del job " + synth)
+            } else {
+                let lm: String
+                if let resume = resumingAt, resume.stage == .lm {
+                    lm = resume.remoteID
+                    onStatus("ACE-Step: riprendo il job LM " + lm)
+                } else {
+                    onStatus("ACE-Step: preparazione musicale (LM interno)…")
+                    lm = try await submit("/lm", data: initial)
+                    await onCheckpoint(try CineoACEJobCheckpoint(stage: .lm, remoteID: lm))
+                }
+                activeJob = lm
+                try await waitForJob(lm)
+                let (lmData, _) = try await send(path: "/job", method: "GET",
+                                                  query: ["id": lm, "result": "1"])
+                let items = try JSONSerialization.jsonObject(with: lmData) as? [[String: Any]]
+                guard let first = items?.first else {
+                    throw CineoMusicError.server("ACE-Step /lm non ha restituito codici musicali.")
+                }
+                let synthJSON = try JSONSerialization.data(withJSONObject: first)
+                onStatus("ACE-Step: sintesi strumentale (DiT + VAE)…")
+                synth = try await submit("/synth", data: synthJSON)
+                activeJob = synth
+                await onCheckpoint(try CineoACEJobCheckpoint(stage: .synth, remoteID: synth))
             }
-            let synthJSON = try JSONSerialization.data(withJSONObject: first)
-            onStatus("ACE-Step: sintesi strumentale (DiT + VAE)…")
-            let synth = try await submit("/synth", data: synthJSON)
-            activeJob = synth
             try await waitForJob(synth)
             onStatus("Recupero traccia audio generata…")
             let (result, response) = try await send(path: "/job", method: "GET",
@@ -84,8 +105,10 @@ public struct CineoACEClient: Sendable {
             // The parent task can be cancelled; issue server cancellation from
             // a fresh context so compute does not keep running unnecessarily.
             if error is CancellationError {
-                let base = self
-                Task.detached { try? await base.cancelJob(job) }
+                if let job {
+                    let base = self
+                    Task.detached { try? await base.cancelJob(job) }
+                }
             }
             throw error
         }
@@ -95,6 +118,8 @@ public struct CineoACEClient: Sendable {
     /// The server receives "request" + "audio" form fields; no /lm job.
     @discardableResult
     public func repaint(request: CineoACERepaintRequest, source: URL, destination: URL,
+                        resumingAt: CineoACEJobCheckpoint? = nil,
+                        onCheckpoint: @escaping @Sendable (CineoACEJobCheckpoint) async -> Void = { _ in },
                         onStatus: @escaping @Sendable (String) -> Void = { _ in }) async throws -> URL {
         try request.validate()
         guard source.isFileURL, destination.isFileURL,
@@ -112,19 +137,30 @@ public struct CineoACEClient: Sendable {
         try Task.checkCancellation()
         onStatus("Repaint: verifica del server locale…")
         try await healthCheck()
-        let sourceData = try Data(contentsOf: source)
-        let boundary = "cineo_repaint_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
-        let multipart = try CineoACEMultipartRepaint.make(
-            request: request, source: sourceData,
-            extension: source.pathExtension.lowercased(), boundary: boundary)
-        try Task.checkCancellation()
-        onStatus("Repaint: invio della traccia sorgente ad ACE-Step locale…")
-        let (reply, _) = try await send(path: "/synth", method: "POST", body: multipart,
-                                       contentType: "multipart/form-data; boundary=" + boundary)
-        guard let job = (try? JSONSerialization.jsonObject(with: reply) as? [String: Any])?["id"] as? String,
-              !job.isEmpty, job.count < 100,
-              job.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") })
-        else { throw CineoMusicError.server("ACE-Step /synth non ha restituito un job repaint valido.") }
+        let job: String
+        if let resumingAt {
+            guard resumingAt.stage == .repaint else {
+                throw CineoMusicError.invalid("Checkpoint non compatibile con repaint.")
+            }
+            job = resumingAt.remoteID
+            onStatus("Repaint: riprendo monitoraggio job " + job)
+        } else {
+            let sourceData = try Data(contentsOf: source)
+            let boundary = "cineo_repaint_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+            let multipart = try CineoACEMultipartRepaint.make(
+                request: request, source: sourceData,
+                extension: source.pathExtension.lowercased(), boundary: boundary)
+            try Task.checkCancellation()
+            onStatus("Repaint: invio della traccia sorgente ad ACE-Step locale…")
+            let (reply, _) = try await send(path: "/synth", method: "POST", body: multipart,
+                                           contentType: "multipart/form-data; boundary=" + boundary)
+            guard let remoteID = (try? JSONSerialization.jsonObject(with: reply) as? [String: Any])?["id"] as? String else {
+                throw CineoMusicError.server("ACE-Step /synth non ha restituito un job repaint valido.")
+            }
+            let checkpoint = try CineoACEJobCheckpoint(stage: .repaint, remoteID: remoteID)
+            job = checkpoint.remoteID
+            await onCheckpoint(checkpoint)
+        }
         do {
             onStatus("Repaint: generazione dell'intervallo selezionato (DiT + VAE)…")
             try await waitForJob(job)
