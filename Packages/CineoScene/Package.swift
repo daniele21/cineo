@@ -9,9 +9,11 @@ let package = Package(
         .executable(name: "cineo-scene-spike", targets: ["CineoSceneSpike"]),
         .executable(name: "cineo-scene-smoke", targets: ["CineoSceneSmoke"])
     ],
+    dependencies: [.package(path: "../CineoProject")],
     targets: [
-        .target(name: "CineoScene"),
-        .executableTarget(name: "CineoSceneSpike", dependencies: ["CineoScene"]),
+        .target(name: "CineoScene", dependencies: [
+            .product(name: "CineoProject", package: "CineoProject")]),
+        .executableTarget(name: "CineoSceneSpike", dependencies: ["CineoScene", .product(name: "CineoProject", package: "CineoProject")]),
         .executableTarget(name: "CineoSceneSmoke", dependencies: ["CineoScene"]),
         .testTarget(name: "CineoSceneTests", dependencies: ["CineoScene"])
     ]

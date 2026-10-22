@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CineoMusic
+import CineoProject
 
 /// Adds imported/generated music and any original narration to an already
 /// rendered Cineo video. Never changes the original recording or rendered input.
@@ -10,6 +11,7 @@ public enum CineoAudioMuxer {
                     ducking: CineoDuckingSettings = .init(),
                     duckingRanges: [CineoAudioActivityRange] = [],
                     cueSounds: [CineoCueSoundEvent] = [],
+                    cuts: CineoCutList? = nil,
                     destination: URL) async throws {
         let videoAsset = AVURLAsset(url: video)
         let vTracks = try await videoAsset.loadTracks(withMediaType: .video)
@@ -29,18 +31,44 @@ public enum CineoAudioMuxer {
 
         var parameters: [AVMutableAudioMixInputParameters] = []
         let narrationAsset = AVURLAsset(url: original)
+        if let cuts {
+            try cuts.validate()
+            guard abs(cuts.outputDuration - duration.seconds) < 0.35 else {
+                throw CineoMusicError.invalid("La timeline dei tagli non coincide con il video.")
+            }
+        }
         if let narration = try await narrationAsset.loadTracks(withMediaType: .audio).first,
            let audioTrack = composition.addMutableTrack(withMediaType: .audio,
                                                    preferredTrackID: kCMPersistentTrackID_Invalid) {
             let narrationDuration = (try await narration.load(.timeRange)).duration
-            let length = CMTimeCompare(narrationDuration, duration) < 0 ? narrationDuration : duration
-            if length.isNumeric && length.seconds > 0 {
-                try audioTrack.insertTimeRange(CMTimeRange(start: .zero, duration: length),
-                                               of: narration, at: .zero)
-                let p = AVMutableAudioMixInputParameters(track: audioTrack)
-                p.setVolume(1, at: .zero)
-                parameters.append(p)
+            if let cuts {
+                var outputCursor = 0.0
+                for span in cuts.retained {
+                    try Task.checkCancellation()
+                    let available = min(span.duration,
+                        max(0, narrationDuration.seconds - span.start))
+                    if available > 0 {
+                        try audioTrack.insertTimeRange(
+                            CMTimeRange(
+                                start: CMTime(seconds: span.start, preferredTimescale: 6000),
+                                duration: CMTime(seconds: available, preferredTimescale: 6000)),
+                            of: narration,
+                            at: CMTime(seconds: outputCursor, preferredTimescale: 6000))
+                    }
+                    outputCursor += span.duration
+                }
+            } else {
+                let length = CMTimeCompare(narrationDuration, duration) < 0
+                    ? narrationDuration : duration
+                if length.isNumeric && length.seconds > 0 {
+                    try audioTrack.insertTimeRange(
+                        CMTimeRange(start: .zero, duration: length),
+                        of: narration, at: .zero)
+                }
             }
+            let p = AVMutableAudioMixInputParameters(track: audioTrack)
+            p.setVolume(1, at: .zero)
+            parameters.append(p)
         }
 
         if let music, let settings {

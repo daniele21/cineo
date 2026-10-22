@@ -4,6 +4,7 @@ import AVFoundation
 import CoreImage
 import CoreGraphics
 import CoreVideo
+import CineoProject
 
 /// CLT-only Core Image/AVFoundation first-export experiment.
 /// The same ScenePlan.evaluate(t) must drive future GUI preview and CLI export.
@@ -15,6 +16,7 @@ public struct CineoSceneExporter: Sendable {
     /// destination is created only after a complete, verified temporary export.
     public func export(source: URL, destination: URL,
                        plan: CineoScenePlan,
+                       cuts: CineoCutList? = nil,
                        onProgress: (@Sendable (Double) -> Void)? = nil) async throws {
         try plan.validate()
         guard source.isFileURL, destination.isFileURL, source != destination,
@@ -33,6 +35,13 @@ public struct CineoSceneExporter: Sendable {
               sourceSize.width > 0, sourceSize.height > 0
         else { throw CineoSceneError.unsupportedSourceTransform }
         let duration = try await sourceAsset.load(.duration)
+        if let cuts {
+            try cuts.validate()
+            guard abs(cuts.sourceDuration - duration.seconds) < 0.04 else {
+                throw CineoSceneError.invalidSource
+            }
+        }
+        let expectedDuration = cuts?.outputDuration ?? duration.seconds
         guard duration.isNumeric, duration.seconds > 0 else {
             throw CineoSceneError.invalidSource
         }
@@ -103,6 +112,12 @@ public struct CineoSceneExporter: Sendable {
                 guard relativePTS.isNumeric, relativePTS.seconds >= 0 else {
                     throw CineoSceneError.readerFailed
                 }
+                // Discard frames in cut regions, retime retained frames to a
+                // contiguous output clock, and evaluate camera at OUTPUT time.
+                guard let outputSeconds = cuts?.outputTime(
+                    forSourceSeconds: relativePTS.seconds) ??
+                    (cuts == nil ? relativePTS.seconds : nil) else { continue }
+                let outputPTS = CMTime(seconds: outputSeconds, preferredTimescale: 60_000)
                 guard let pool = adaptor.pixelBufferPool else {
                     throw CineoSceneError.writerFailed
                 }
@@ -112,18 +127,18 @@ public struct CineoSceneExporter: Sendable {
                 else { throw CineoSceneError.writerFailed }
                 let raw = CIImage(cvPixelBuffer: inputBuffer)
                 let edited = try CineoSceneFrameRenderer.compose(
-                    raw, at: relativePTS.seconds, with: plan
+                    raw, at: outputSeconds, with: plan
                 )
                 ciContext.render(edited, to: newBuffer, bounds: outputBounds, colorSpace: colorSpace)
                 while !writerInput.isReadyForMoreMediaData {
                     try Task.checkCancellation()
                     try await Task.sleep(for: .milliseconds(5))
                 }
-                guard adaptor.append(newBuffer, withPresentationTime: relativePTS) else {
+                guard adaptor.append(newBuffer, withPresentationTime: outputPTS) else {
                     throw CineoSceneError.writerFailed
                 }
                 frameCount += 1
-                onProgress?(min(0.99, max(0, relativePTS.seconds / duration.seconds)))
+                onProgress?(min(0.99, max(0, outputSeconds / expectedDuration)))
             }
             guard reader.status == .completed, frameCount > 0 else {
                 throw CineoSceneError.readerFailed
@@ -137,7 +152,7 @@ public struct CineoSceneExporter: Sendable {
             let outDuration = try await verified.load(.duration)
             guard let outTrack = outTracks.first, outDuration.isNumeric,
                   outDuration.seconds > 0,
-                  abs(outDuration.seconds - duration.seconds) < 0.35
+                  abs(outDuration.seconds - expectedDuration) < 0.35
             else { throw CineoSceneError.invalidOutput }
             let outSize = try await outTrack.load(.naturalSize)
             guard abs(outSize.width - CGFloat(width)) <= 1,

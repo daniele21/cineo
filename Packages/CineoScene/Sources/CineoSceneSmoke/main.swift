@@ -1,5 +1,6 @@
 import Foundation
 import CineoScene
+import CineoProject
 
 #if canImport(AVFoundation) && canImport(CoreImage)
 import AVFoundation
@@ -51,7 +52,20 @@ struct SceneSyntheticExportSmoke {
             guard try Data(contentsOf: source) != Data(contentsOf: output) else {
                 throw SmokeError.invalidOutput
             }
-            print("PASS: 2s H.264 source → visually transformed Cineo MP4, decoded first frame, source unchanged.")
+            // A second render follows an actual cut-list. It checks that
+            // source remains bit-identical while decoded output gets shorter.
+            let cutOutput = folder.appendingPathComponent("cut.mp4")
+            let cuts = try CineoCutList(sourceDuration: sourceDuration.seconds)
+                .removingOutputRange(start: 0.4, end: 0.8)
+            try await CineoSceneExporter().export(
+                source: source, destination: cutOutput, plan: plan, cuts: cuts)
+            let cutAsset = AVURLAsset(url: cutOutput)
+            let cutDuration = try await cutAsset.load(.duration)
+            guard abs(cutDuration.seconds - cuts.outputDuration) < 0.15,
+                  SHA256.hash(data: try Data(contentsOf: source)) == before else {
+                throw SmokeError.invalidOutput
+            }
+            print("PASS: 2s H.264 source → original and cut outputs, source SHA unchanged, retimed MP4 decoded.")
         } catch {
             FileHandle.standardError.write(Data("FAIL synthetic render smoke: \(error)\n".utf8))
             exit(1)
