@@ -40,7 +40,7 @@ public enum CineoBeatAnalyzer {
             waveform[min(bins - 1, i * bins / count)] = max(waveform[min(bins - 1, i * bins / count)], value)
         }
 
-        let hop = max(64, Int(sampleRate * 0.02))
+        let hop = max(16, Int(sampleRate * 0.02))
         let window = max(hop * 2, Int(sampleRate * 0.04))
         guard count > window * 2 else {
             return .init(sourceDuration: duration, waveform: waveform, onsets: [], estimatedBPM: nil)
