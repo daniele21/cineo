@@ -6,9 +6,11 @@ import CoreVideo
 import AppKit
 import OSLog
 import UniformTypeIdentifiers
+import Combine
 
 @main
 struct CineoApp: App {
+    @NSApplicationDelegateAdaptor(CineoApplicationDelegate.self) private var applicationDelegate
     @StateObject private var recorder = CineoScreenRecorder()
     @StateObject private var editor = CineoEditorModel()
 
@@ -26,8 +28,64 @@ struct CineoApp: App {
                 }
             }
             .tint(CineoBrand.ocean)
+            .onAppear { applicationDelegate.attach(editor: editor) }
         }
         .windowResizability(.contentSize)
+    }
+}
+
+
+/// App termination is the only place allowed to tear down app-owned music
+/// processes. Closing a sheet or editor window must not interrupt the queue.
+@MainActor
+final class CineoApplicationDelegate: NSObject, NSApplicationDelegate {
+    private weak var editor: CineoEditorModel?
+    private var subscription: AnyCancellable?
+    private var finishAfterJobs = false
+    private var isTerminating = false
+
+    func attach(editor: CineoEditorModel) {
+        guard self.editor !== editor else { return }
+        self.editor = editor
+        subscription = editor.musicQueue.$jobs.sink { [weak self] _ in
+            Task { @MainActor [weak self] in self?.checkDeferredExit() }
+        }
+    }
+
+    private func checkDeferredExit() {
+        guard finishAfterJobs, let editor, !editor.musicQueue.hasWork else { return }
+        finishAfterJobs = false
+        NSApp.terminate(nil)
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let editor else { return .terminateNow }
+        if isTerminating { return .terminateLater }
+        if editor.musicQueue.hasWork {
+            let alert = NSAlert()
+            alert.messageText = "Generazioni musicali in corso"
+            alert.informativeText = "Chiudere Cineo interrompe il motore locale. La coda è salvata, ma i lavori in corso potrebbero dover essere ripetuti."
+            alert.addButton(withTitle: "Resta in Cineo")
+            alert.addButton(withTitle: "Esci al termine")
+            alert.addButton(withTitle: "Interrompi ed esci")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                return .terminateCancel
+            case .alertSecondButtonReturn:
+                finishAfterJobs = true
+                return .terminateCancel
+            default:
+                break
+            }
+        }
+        isTerminating = true
+        editor.musicQueue.prepareForAppExit()
+        editor.aceBackend.downloader.cancel()
+        Task {
+            await editor.aceBackend.shutdown()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }
 

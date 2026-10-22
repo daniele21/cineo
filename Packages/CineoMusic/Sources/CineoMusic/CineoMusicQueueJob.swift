@@ -81,6 +81,17 @@ public struct CineoMusicQueueJob: Codable, Equatable, Identifiable, Sendable {
         self.status = "In coda"
     }
 
+    /// A remote job ID is only meaningful on its original live server.
+    /// Do not silently resubmit or poll it across a Cineo application restart.
+    public mutating func invalidateUnverifiedRemoteCheckpoint() {
+        guard checkpoint != nil else { return }
+        if phase == .queued || phase == .interrupted {
+            phase = .interrupted
+            checkpoint = nil
+            status = "Server ACE-Step precedente non verificabile. Riprova il job manualmente."
+        }
+    }
+
     public mutating func recoverAfterAppRestart(outputExists: Bool) {
         if phase == .running && outputExists {
             phase = .ready

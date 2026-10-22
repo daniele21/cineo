@@ -73,6 +73,12 @@ final class CineoEditorModel: ObservableObject {
         let at: Double
     }
 
+    private var musicRuntime: CineoMusicRuntimeCoordinator?
+
+    init() {
+        musicRuntime = CineoMusicRuntimeCoordinator(queue: musicQueue, backend: aceBackend)
+    }
+
     private var previewTask: Task<Void, Never>?
     private var previewRequest = UUID()
     private var previewGenerator: AVAssetImageGenerator?

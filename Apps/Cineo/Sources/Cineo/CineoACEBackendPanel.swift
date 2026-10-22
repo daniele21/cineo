@@ -95,7 +95,10 @@ struct CineoACEBackendPanel: View {
                 }
                 .font(.caption)
             }
-            Text("Porta 8080 · solo 127.0.0.1 · i server avviati esternamente non vengono arrestati da Cineo.")
+            Text("Motore avviato on demand dalla coda e spento dopo 10 minuti di inattività. Solo i processi avviati da Cineo vengono terminati.")
+                .font(.caption2).foregroundStyle(.secondary)
+            Text("Porta 8080 · solo 127.0.0.1 · i server esterni non vengono arrestati.")
+
                 .font(.caption2).foregroundStyle(.tertiary)
         }
         .padding(12)
