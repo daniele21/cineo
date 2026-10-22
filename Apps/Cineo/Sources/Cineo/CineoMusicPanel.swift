@@ -418,6 +418,19 @@ struct CineoMusicPanel: View {
                                 editor.proposeCueCamera(cue.id)
                             }.disabled(editor.isExporting)
                               .help("Propone un'animazione di camera sul cue, senza modificare il video")
+                            Button(cue.soundEnabled == true ? "SFX attivo" : "Aggiungi SFX") {
+                                editor.updateCueSound(cue.id, enabled: cue.soundEnabled != true)
+                            }.disabled(editor.isExporting)
+                            if cue.soundEnabled == true {
+                                Slider(value: Binding(
+                                    get: { editor.musicCues.first(where: { $0.id == cue.id })?.soundVolume ?? 0.28 },
+                                    set: { editor.updateCueSound(cue.id, volume: $0) }),
+                                    in: 0...1)
+                                    .frame(width: 70)
+                                    .help("Volume effetto sonoro")
+                                Button("Ascolta") { editor.previewCueSound(cue.id) }
+                                    .disabled(editor.isExporting)
+                            }
                             Button { editor.removeMusicCue(cue.id) } label: {
                                 Image(systemName: "xmark.circle")
                             }.help("Elimina cue")
@@ -438,7 +451,7 @@ struct CineoMusicPanel: View {
                     }
                 }
             }
-            Text("I cue possono creare zoom e transizioni solo previa conferma. Non sono effetti audio.")
+            Text("Gli effetti Hit, Crescendo e Transizione sono sintetizzati localmente. Ogni cue va abilitato esplicitamente; anteprima ed MP4 usano la stessa forma d'onda.")
                 .font(.caption2).foregroundStyle(.secondary)
             Divider()
             HStack {
