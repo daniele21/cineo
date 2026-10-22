@@ -61,6 +61,7 @@ final class CineoEditorModel: ObservableObject {
     @Published var selectedCueKind: CineoMusicCueKind = .hit
     @Published var suggestedCueCamera: CineoCueCameraSuggestion?
     @Published var originalAudioAnalysis: CineoBeatAnalysis?
+    @Published var likelySpeechWindows: [CineoAudioActivityRange]?
     @Published var musicAnalysis: CineoBeatAnalysis?
     @Published var suggestedBeatAlignment: CineoBeatAlignment?
     @Published var musicStatus = "Imposta la musica e avvia ACE-Step locale, oppure importa un audio."
@@ -142,6 +143,7 @@ final class CineoEditorModel: ObservableObject {
         musicAnalysisTask?.cancel()
         originalAudioAnalysisTask?.cancel()
         originalAudioAnalysis = nil
+        likelySpeechWindows = nil
         musicAnalysis = nil
         suggestedBeatAlignment = nil
         musicAsset = nil
@@ -212,22 +214,41 @@ final class CineoEditorModel: ObservableObject {
 
     var musicDuckingRanges: [CineoAudioActivityRange] {
         guard duckingSettings.enabled, let analysis = originalAudioAnalysis else { return [] }
-        return CineoAudioActivityDetector.ranges(peakBins: analysis.activityLevels,
-            duration: analysis.sourceDuration, threshold: duckingSettings.threshold)
+        let activity = CineoAudioActivityDetector.ranges(
+            peakBins: analysis.activityLevels, duration: analysis.sourceDuration,
+            threshold: duckingSettings.threshold)
+        guard duckingSettings.detectionMode == .likelySpeech else { return activity }
+        guard let likelySpeechWindows else { return [] }
+        return CineoLikelySpeechGate.intersection(
+            activity: activity, speechWindows: likelySpeechWindows)
     }
 
     private func analyzeOriginalAudioActivity() {
         originalAudioAnalysisTask?.cancel()
         originalAudioAnalysis = nil
+        likelySpeechWindows = nil
         guard duckingSettings.enabled, let original = sourceURL else { return }
-        musicStatus = "Analisi locale dell'attività audio originale…"
+        let analysisMode = duckingSettings.detectionMode ?? .anyAudio
+        musicStatus = analysisMode == .likelySpeech
+            ? "SoundAnalysis: analisi locale del parlato probabile…"
+            : "Analisi locale dell'attività audio originale…"
         originalAudioAnalysisTask = Task { [weak self] in
             do {
                 let analysis = try await CineoMusicAudioAnalyzer.analyze(url: original)
                 try Task.checkCancellation()
-                guard let self, self.sourceURL == original else { return }
+                let speech = analysisMode == .likelySpeech
+                    ? try await CineoLikelySpeechClassifier.ranges(url: original) : nil
+                try Task.checkCancellation()
+                guard let self, self.sourceURL == original,
+                      self.duckingSettings.enabled,
+                      (self.duckingSettings.detectionMode ?? .anyAudio) == analysisMode else {
+                    return
+                }
                 self.originalAudioAnalysis = analysis
-                self.musicStatus = "Ducking pronto: \(self.musicDuckingRanges.count) intervalli di attività audio."
+                self.likelySpeechWindows = speech
+                self.musicStatus = analysisMode == .likelySpeech
+                    ? "Ducking parlato probabile: \(self.musicDuckingRanges.count) intervalli locali."
+                    : "Ducking attività audio: \(self.musicDuckingRanges.count) intervalli."
             } catch is CancellationError {
                 // Source changed or user disabled ducking.
             } catch {
@@ -240,16 +261,22 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func updateDucking(enabled: Bool? = nil, level: Double? = nil,
-                       threshold: Double? = nil) {
+                       threshold: Double? = nil,
+                       mode: CineoDuckingDetectionMode? = nil) {
         guard !isExporting else { return }
+        let previousMode = duckingSettings.detectionMode ?? .anyAudio
         if let enabled { duckingSettings.enabled = enabled }
         if let level { duckingSettings.level = min(1, max(0, level)) }
         if let threshold { duckingSettings.threshold = min(1, max(0.01, threshold)) }
-        if duckingSettings.enabled && originalAudioAnalysis == nil {
+        if let mode { duckingSettings.detectionMode = mode }
+        if duckingSettings.enabled &&
+            (originalAudioAnalysis == nil
+             || (duckingSettings.detectionMode ?? .anyAudio) != previousMode) {
             analyzeOriginalAudioActivity()
         } else if !duckingSettings.enabled {
             originalAudioAnalysisTask?.cancel()
             originalAudioAnalysis = nil
+            likelySpeechWindows = nil
         }
         saveMusicSettings()
     }
@@ -1318,6 +1345,7 @@ final class CineoEditorModel: ObservableObject {
         let exportMusicClip = musicClip
         let exportDucking = duckingSettings
         let exportDuckingRanges = musicDuckingRanges
+        let exportHasSpeechWindows = likelySpeechWindows != nil
         let exportCueSounds: [CineoCueSoundEvent]
         do {
             exportCueSounds = try CineoCueSoundPlanner.plan(
@@ -1355,14 +1383,24 @@ final class CineoEditorModel: ObservableObject {
                 let hasOriginalAudio = !(try await originalAsset.loadTracks(withMediaType: .audio)).isEmpty
                 var resolvedDuckingRanges = exportDuckingRanges
                 if exportMusicURL != nil && exportDucking.enabled && hasOriginalAudio
-                    && originalAudioAnalysis == nil {
+                    && (originalAudioAnalysis == nil
+                        || (exportDucking.detectionMode == .likelySpeech && !exportHasSpeechWindows)) {
                     status = "Analizzo l'attività audio originale prima del mix…"
                     let analysis = try await CineoMusicAudioAnalyzer.analyze(url: url)
                     try Task.checkCancellation()
-                    resolvedDuckingRanges = CineoAudioActivityDetector.ranges(
+                    let activity = CineoAudioActivityDetector.ranges(
                         peakBins: analysis.activityLevels,
                         duration: analysis.sourceDuration,
                         threshold: exportDucking.threshold)
+                    if exportDucking.detectionMode == .likelySpeech {
+                        status = "Classifico il parlato probabile sul Mac prima dell'export…"
+                        let likelySpeech = try await CineoLikelySpeechClassifier.ranges(url: url)
+                        try Task.checkCancellation()
+                        resolvedDuckingRanges = CineoLikelySpeechGate.intersection(
+                            activity: activity, speechWindows: likelySpeech)
+                    } else {
+                        resolvedDuckingRanges = activity
+                    }
                 }
                 if exportMusicURL != nil || hasOriginalAudio || !exportCueSounds.isEmpty {
                     status = "Composizione audio/video e applicazione fade…"
