@@ -50,6 +50,8 @@ final class CineoEditorModel: ObservableObject {
     // Backend lifecycle belongs to Cineo, never to a specific .cineo project.
     let aceBackend = CineoACEBackendController()
     @Published var musicSettings = CineoMusicSettings()
+    @Published var repaintStart = 0.0
+    @Published var repaintEnd = 0.0
     @Published var musicAsset: CineoMusicAsset?
     @Published var musicDisplayName = ""
     @Published var musicActualDuration = 0.0
@@ -564,6 +566,71 @@ final class CineoEditorModel: ObservableObject {
                 self.musicStatus = "Generazione musicale annullata."
             } catch {
                 self.musicStatus = "ACE-Step: \(error.localizedDescription)"
+            }
+            self.isGeneratingMusic = false
+            self.musicTask = nil
+        }
+    }
+
+    /// Mark an exact interval on the *video* timeline. The pure Swift
+    /// contract maps to source time and rejects loop seam crossings.
+    func markRepaintStart() {
+        repaintStart = selectedTime
+        if repaintEnd <= repaintStart { repaintEnd = min(duration, repaintStart + 4) }
+    }
+
+    func markRepaintEnd() {
+        repaintEnd = selectedTime
+    }
+
+    func repaintMusicSelection() {
+        guard let original = musicURL, !isGeneratingMusic, !isExporting else { return }
+        let request: CineoACERepaintRequest
+        do {
+            request = try .fromVideoSelection(
+                start: repaintStart, end: repaintEnd, clip: musicClip,
+                offset: musicSettings.offset, sourceDuration: effectiveSourceDuration,
+                videoDuration: duration, prompt: musicSettings.caption, seed: musicSettings.seed)
+            guard ["wav", "mp3"].contains(original.pathExtension.lowercased()) else {
+                throw CineoMusicError.invalid(
+                    "Repaint ACE-Step accetta WAV o MP3. Importa la traccia in uno di questi formati.")
+            }
+        } catch {
+            musicStatus = error.localizedDescription
+            return
+        }
+        let destination = musicDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+        isGeneratingMusic = true
+        musicStatus = String(format:
+            "Repaint ACE-Step da %.2f a %.2f s della sorgente. Audio originale intatto.",
+            request.sourceStart, request.sourceEnd)
+        musicTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let client = try CineoACEClient()
+                try await client.repaint(request: request, source: original,
+                                         destination: destination) { message in
+                    Task { @MainActor [weak self] in self?.musicStatus = message }
+                }
+                try Task.checkCancellation()
+                guard self.musicURL == original else {
+                    try? FileManager.default.removeItem(at: destination)
+                    throw CineoMusicError.invalid(
+                        "La traccia è cambiata durante il repaint. Risultato non applicato.")
+                }
+                // Only after successful WAV validation do we switch the
+                // active reference. The old source file is never removed.
+                self.musicAsset = CineoMusicAsset(
+                    fileName: destination.lastPathComponent, settings: self.musicSettings)
+                self.musicDisplayName = "Repaint · (Int(request.sourceStart))–(Int(request.sourceEnd)) s"
+                self.prepareMusicPlayer()
+                self.saveMusicSettings()
+                self.musicStatus = "Repaint pronto. La vecchia traccia resta in Media."
+            } catch is CancellationError {
+                try? FileManager.default.removeItem(at: destination)
+                self.musicStatus = "Repaint annullato; musica originale intatta."
+            } catch {
+                self.musicStatus = "Repaint non applicato: (error.localizedDescription)"
             }
             self.isGeneratingMusic = false
             self.musicTask = nil
