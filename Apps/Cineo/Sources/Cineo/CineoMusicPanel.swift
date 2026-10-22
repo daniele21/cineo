@@ -240,18 +240,15 @@ struct CineoMusicPanel: View {
                     HStack(spacing: 12) {
                         Button("Importa / sostituisci audio…") { editor.importMusicDialog() }
                             .disabled(editor.isGeneratingMusic || editor.isExporting)
-                        Button(editor.isGeneratingMusic ? "Annulla generazione" : "Genera con ACE-Step") {
-                            if editor.isGeneratingMusic { editor.cancelMusicGeneration() }
-                            else { editor.generateMusic() }
+                        Button("Accoda generazione ACE-Step") {
+                            editor.generateMusic()
                         }.buttonStyle(.borderedProminent)
                             .disabled(editor.isExporting || editor.sourceURL == nil)
+                        CineoMusicQueueButton(editor: editor)
                         Spacer()
                     }
-                    if editor.isGeneratingMusic {
-                        ProgressView().controlSize(.small)
-                        Text("ACE-Step restituisce la fase, non una percentuale reale.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
+                    Text("La generazione prosegue nella coda anche se chiudi questa finestra o cambi video. Quando è pronta, applica la traccia dalla coda.")
+                        .font(.caption2).foregroundStyle(.secondary)
                     Text(editor.musicStatus).font(.caption).foregroundStyle(.secondary)
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     Text("Backend locale: http://127.0.0.1:8080. Nessun accesso cloud necessario.")
@@ -373,8 +370,7 @@ struct CineoMusicPanel: View {
                     Button("Rigenera solo l'intervallo") {
                         editor.repaintMusicSelection()
                     }
-                    .disabled(editor.isGeneratingMusic || editor.isExporting
-                        || editor.musicURL == nil)
+                    .disabled(editor.isExporting || editor.musicURL == nil)
                     Text("WAV / MP3 · senza LM · nessun file sovrascritto")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
