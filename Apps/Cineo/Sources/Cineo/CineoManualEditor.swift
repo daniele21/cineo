@@ -201,7 +201,7 @@ final class CineoEditorModel: ObservableObject {
 
     var musicDuckingRanges: [CineoAudioActivityRange] {
         guard duckingSettings.enabled, let analysis = originalAudioAnalysis else { return [] }
-        return CineoAudioActivityDetector.ranges(peakBins: analysis.waveform,
+        return CineoAudioActivityDetector.ranges(peakBins: analysis.activityLevels,
             duration: analysis.sourceDuration, threshold: duckingSettings.threshold)
     }
 
@@ -1124,7 +1124,7 @@ final class CineoEditorModel: ObservableObject {
                     let analysis = try await CineoMusicAudioAnalyzer.analyze(url: url)
                     try Task.checkCancellation()
                     resolvedDuckingRanges = CineoAudioActivityDetector.ranges(
-                        peakBins: analysis.waveform,
+                        peakBins: analysis.activityLevels,
                         duration: analysis.sourceDuration,
                         threshold: exportDucking.threshold)
                 }
