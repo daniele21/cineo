@@ -40,3 +40,22 @@ Record Git SHA, macOS version/host, Swift/CLT version, sanitized job phase progr
 - A telemetry metadata failure must not invalidate a successful H.264 recording.
 - Record both system and microphone audio only when selected; if denied, preserve the existing recording flow with an actionable explanation.
 - Observe elapsed-time, actual output FPS, A/V drift and visual preview/export match on a real Apple Silicon Mac. Do not claim these passed based only on synthetic CI.
+
+
+## Smart Camera structural benchmark (quality branch)
+
+The pure-Swift executable `cineo-camera-benchmark` runs fixed synthetic
+fixture cases without accessing real desktop/video content. Its output
+is JSON with shot counts, shot density, closest wide-frame gap, maximum
+zoom and safety violations. CI must fail if fixture shot count changes
+outside a documented expectation or if output exceeds source bounds,
+overlaps, or violates selected shot-frequency budgets.
+
+This benchmark is **not a visual-quality score**. Final acceptance still
+requires viewing 30/60-second recordings and comparing timeline preview
+with encoded MP4, especially on secondary displays.
+
+Studio now supports previewing, visiting and independently rejecting each
+suggested shot without deleting recorded media or overwriting manual edits.
+Manual edits are replaced only with user confirmation and a successful
+durable save.

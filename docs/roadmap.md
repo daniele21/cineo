@@ -13,6 +13,20 @@ Parallel active work in [PR #67](https://github.com/daniele21/cineo/pull/67):
 - **Capture:** opt-in mouse click sidecar (first ScreenCaptureKit frame host time), optional system audio and microphone (off by default), no text/keystroke recording.
 - **Integration:** preserve recorded click metadata across save as `.cineo` and reopen; one CineoScene renderer for preview and export.
 
+### Smart Camera quality and editing controls (2026-10-22)
+
+The incremental quality branch adds deterministic fixture metrics to the
+existing `CineoDirector` package. The benchmark checks structural safety,
+zoom cadence, wide gaps and source-bounded cropping. This is **not** an
+aesthetic or result-awareness score. Studio lets users preview every proposed
+shot, disable individual shots, jump to their timeline position, and apply
+only the accepted sequence. Previous manual keyframes are still preserved
+until explicit confirmation, with a failed save rolling back.
+
+Quality fixtures run in parallel with director unit tests on Linux and
+native CLT app build on macOS. Physical-Mac motion judgment and A/V
+experience are deferred to the final E2E gate.
+
 ### Next delivery gates
 
 1. **Integration baseline:** green CLT build/music/events/director/scene/QA checks; resolve stacked PR ancestry and duplicate audio-polish proposals, without blind cherry-picks.

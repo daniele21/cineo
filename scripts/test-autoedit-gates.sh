@@ -17,6 +17,10 @@ run_package() {
 }
 run_package CineoProject
 run_package CineoDirector
+if [[ -f "Packages/CineoDirector/Sources/CineoCameraBenchmark/main.swift" ]]; then
+  printf '\n== Checking synthetic camera quality fixtures ==\n'
+  swift run --package-path Packages/CineoDirector cineo-camera-benchmark
+fi
 run_package CineoEditPlanner
 run_package CineoEvents
 run_package CineoScene
