@@ -287,6 +287,9 @@ final class CineoEditorModel: ObservableObject {
     func setMusicSourceIn(_ seconds: Double) {
         guard musicAsset != nil, !isExporting else { return }
         musicClip.sourceIn = max(0, min(seconds, max(0, effectiveSourceDuration - 0.04)))
+        if let overlap = musicClip.crossfade {
+            musicClip.crossfade = min(overlap, (effectiveSourceDuration - musicClip.sourceIn) * 0.40)
+        }
         suggestedBeatAlignment = nil
         saveMusicSettings()
     }
@@ -301,6 +304,7 @@ final class CineoEditorModel: ObservableObject {
     func setMusicLoop(_ enabled: Bool) {
         guard musicAsset != nil, !isExporting else { return }
         musicClip.loop = enabled
+        if !enabled { musicClip.crossfade = nil }
         if enabled && musicClip.duration == nil {
             musicClip.duration = max(0.04, duration - musicSettings.offset)
         }
@@ -541,7 +545,9 @@ final class CineoEditorModel: ObservableObject {
         pausePreviewPlayback()
         musicTask?.cancel()
         musicAnalysisTask?.cancel()
+        originalActivityTask?.cancel()
         musicPlayer = nil
+        musicOverlapPlayer = nil
         previewPlayer = nil
         previewFrameOutput = nil
         previewTask?.cancel()
@@ -754,7 +760,10 @@ final class CineoEditorModel: ObservableObject {
         }
         pausePreviewPlayback()
         musicTask?.cancel()
+        musicAnalysisTask?.cancel()
+        originalActivityTask?.cancel()
         musicPlayer = nil
+        musicOverlapPlayer = nil
         previewPlayer = nil
         previewFrameOutput = nil
         previewTask?.cancel()
@@ -1017,6 +1026,7 @@ final class CineoEditorModel: ObservableObject {
 
     func pausePreviewPlayback() {
         musicPlayer?.pause()
+        musicOverlapPlayer?.pause()
         guard isPreviewPlaying else { return }
         previewPlayer?.pause()
         isPreviewPlaying = false
