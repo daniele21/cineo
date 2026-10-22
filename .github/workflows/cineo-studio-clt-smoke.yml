@@ -6,6 +6,7 @@ on:
       - 'Apps/Cineo/**'
       - 'Packages/CineoScene/**'
       - 'Packages/CineoMusic/**'
+      - 'Packages/CineoAudio/**'
       - '.github/workflows/cineo-studio-clt-smoke.yml'
   workflow_dispatch:
 
@@ -54,6 +55,9 @@ jobs:
       - name: Generate and re-render synthetic H264 with shared preview/export compositor
         run: |
           swift run --package-path Packages/CineoScene --configuration release cineo-scene-smoke
+      - name: Real local audio smoke (H264 + WAV, crossfade loop and ducked MP4)
+        run: |
+          swift run --package-path Packages/CineoAudio --configuration release cineo-audio-smoke
       - name: Reject SwiftUI @State macros unavailable in Apple CLT
         run: |
           # Apple CLT Swift 6.3 ships SwiftUI but not the host SwiftUIMacros
