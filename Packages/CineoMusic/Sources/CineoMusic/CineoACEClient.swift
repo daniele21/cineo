@@ -36,7 +36,7 @@ public struct CineoACEClient: Sendable {
     @discardableResult
     public func generate(settings: CineoMusicSettings, destination: URL,
                          resumingAt: CineoACEJobCheckpoint? = nil,
-                         onCheckpoint: @escaping @Sendable (CineoACEJobCheckpoint) async -> Void = { _ in },
+                         onCheckpoint: @escaping @Sendable (CineoACEJobCheckpoint) async throws -> Void = { _ in },
                          onStatus: @escaping @Sendable (String) -> Void = { _ in }) async throws -> URL {
         try settings.validate()
         guard destination.isFileURL, destination.pathExtension.lowercased() == "wav",
@@ -64,7 +64,7 @@ public struct CineoACEClient: Sendable {
                 } else {
                     onStatus("ACE-Step: preparazione musicale (LM interno)…")
                     lm = try await submit("/lm", data: initial)
-                    await onCheckpoint(try CineoACEJobCheckpoint(stage: .lm, remoteID: lm))
+                    try await onCheckpoint(try CineoACEJobCheckpoint(stage: .lm, remoteID: lm))
                 }
                 activeJob = lm
                 try await waitForJob(lm)
@@ -78,7 +78,7 @@ public struct CineoACEClient: Sendable {
                 onStatus("ACE-Step: sintesi strumentale (DiT + VAE)…")
                 synth = try await submit("/synth", data: synthJSON)
                 activeJob = synth
-                await onCheckpoint(try CineoACEJobCheckpoint(stage: .synth, remoteID: synth))
+                try await onCheckpoint(try CineoACEJobCheckpoint(stage: .synth, remoteID: synth))
             }
             try await waitForJob(synth)
             onStatus("Recupero traccia audio generata…")
@@ -119,7 +119,7 @@ public struct CineoACEClient: Sendable {
     @discardableResult
     public func repaint(request: CineoACERepaintRequest, source: URL, destination: URL,
                         resumingAt: CineoACEJobCheckpoint? = nil,
-                        onCheckpoint: @escaping @Sendable (CineoACEJobCheckpoint) async -> Void = { _ in },
+                        onCheckpoint: @escaping @Sendable (CineoACEJobCheckpoint) async throws -> Void = { _ in },
                         onStatus: @escaping @Sendable (String) -> Void = { _ in }) async throws -> URL {
         try request.validate()
         guard source.isFileURL, destination.isFileURL,
@@ -159,7 +159,7 @@ public struct CineoACEClient: Sendable {
             }
             let checkpoint = try CineoACEJobCheckpoint(stage: .repaint, remoteID: remoteID)
             job = checkpoint.remoteID
-            await onCheckpoint(checkpoint)
+            try await onCheckpoint(checkpoint)
         }
         do {
             onStatus("Repaint: generazione dell'intervallo selezionato (DiT + VAE)…")
