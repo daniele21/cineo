@@ -50,6 +50,8 @@ final class CineoEditorModel: ObservableObject {
     // Backend lifecycle belongs to Cineo, never to a specific .cineo project.
     let aceBackend = CineoACEBackendController()
     @Published var musicSettings = CineoMusicSettings()
+    @Published var repaintStart = 0.0
+    @Published var repaintEnd = 0.0
     @Published var musicAsset: CineoMusicAsset?
     @Published var musicDisplayName = ""
     @Published var musicActualDuration = 0.0
@@ -59,6 +61,7 @@ final class CineoEditorModel: ObservableObject {
     @Published var selectedCueKind: CineoMusicCueKind = .hit
     @Published var suggestedCueCamera: CineoCueCameraSuggestion?
     @Published var originalAudioAnalysis: CineoBeatAnalysis?
+    @Published var likelySpeechWindows: [CineoAudioActivityRange]?
     @Published var musicAnalysis: CineoBeatAnalysis?
     @Published var suggestedBeatAlignment: CineoBeatAlignment?
     @Published var musicStatus = "Imposta la musica e avvia ACE-Step locale, oppure importa un audio."
@@ -81,6 +84,8 @@ final class CineoEditorModel: ObservableObject {
     private var musicTask: Task<Void, Never>?
     private var musicPlayer: AVPlayer?
     private var musicCrossfadePlayer: AVPlayer?
+    private var cuePreviewPlayers: [AVAudioPlayer] = []
+    private var lastCuePreviewTime: Double?
     private var originalAudioAnalysisTask: Task<Void, Never>?
     private var musicAnalysisTask: Task<Void, Never>?
     private var musicDragInitialOffset: Double?
@@ -138,6 +143,7 @@ final class CineoEditorModel: ObservableObject {
         musicAnalysisTask?.cancel()
         originalAudioAnalysisTask?.cancel()
         originalAudioAnalysis = nil
+        likelySpeechWindows = nil
         musicAnalysis = nil
         suggestedBeatAlignment = nil
         musicAsset = nil
@@ -208,22 +214,41 @@ final class CineoEditorModel: ObservableObject {
 
     var musicDuckingRanges: [CineoAudioActivityRange] {
         guard duckingSettings.enabled, let analysis = originalAudioAnalysis else { return [] }
-        return CineoAudioActivityDetector.ranges(peakBins: analysis.activityLevels,
-            duration: analysis.sourceDuration, threshold: duckingSettings.threshold)
+        let activity = CineoAudioActivityDetector.ranges(
+            peakBins: analysis.activityLevels, duration: analysis.sourceDuration,
+            threshold: duckingSettings.threshold)
+        guard duckingSettings.detectionMode == .likelySpeech else { return activity }
+        guard let likelySpeechWindows else { return [] }
+        return CineoLikelySpeechGate.intersection(
+            activity: activity, speechWindows: likelySpeechWindows)
     }
 
     private func analyzeOriginalAudioActivity() {
         originalAudioAnalysisTask?.cancel()
         originalAudioAnalysis = nil
+        likelySpeechWindows = nil
         guard duckingSettings.enabled, let original = sourceURL else { return }
-        musicStatus = "Analisi locale dell'attività audio originale…"
+        let analysisMode = duckingSettings.detectionMode ?? .anyAudio
+        musicStatus = analysisMode == .likelySpeech
+            ? "SoundAnalysis: analisi locale del parlato probabile…"
+            : "Analisi locale dell'attività audio originale…"
         originalAudioAnalysisTask = Task { [weak self] in
             do {
                 let analysis = try await CineoMusicAudioAnalyzer.analyze(url: original)
                 try Task.checkCancellation()
-                guard let self, self.sourceURL == original else { return }
+                let speech = analysisMode == .likelySpeech
+                    ? try await CineoLikelySpeechClassifier.ranges(url: original) : nil
+                try Task.checkCancellation()
+                guard let self, self.sourceURL == original,
+                      self.duckingSettings.enabled,
+                      (self.duckingSettings.detectionMode ?? .anyAudio) == analysisMode else {
+                    return
+                }
                 self.originalAudioAnalysis = analysis
-                self.musicStatus = "Ducking pronto: \(self.musicDuckingRanges.count) intervalli di attività audio."
+                self.likelySpeechWindows = speech
+                self.musicStatus = analysisMode == .likelySpeech
+                    ? "Ducking parlato probabile: \(self.musicDuckingRanges.count) intervalli locali."
+                    : "Ducking attività audio: \(self.musicDuckingRanges.count) intervalli."
             } catch is CancellationError {
                 // Source changed or user disabled ducking.
             } catch {
@@ -236,16 +261,22 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func updateDucking(enabled: Bool? = nil, level: Double? = nil,
-                       threshold: Double? = nil) {
+                       threshold: Double? = nil,
+                       mode: CineoDuckingDetectionMode? = nil) {
         guard !isExporting else { return }
+        let previousMode = duckingSettings.detectionMode ?? .anyAudio
         if let enabled { duckingSettings.enabled = enabled }
         if let level { duckingSettings.level = min(1, max(0, level)) }
         if let threshold { duckingSettings.threshold = min(1, max(0.01, threshold)) }
-        if duckingSettings.enabled && originalAudioAnalysis == nil {
+        if let mode { duckingSettings.detectionMode = mode }
+        if duckingSettings.enabled &&
+            (originalAudioAnalysis == nil
+             || (duckingSettings.detectionMode ?? .anyAudio) != previousMode) {
             analyzeOriginalAudioActivity()
         } else if !duckingSettings.enabled {
             originalAudioAnalysisTask?.cancel()
             originalAudioAnalysis = nil
+            likelySpeechWindows = nil
         }
         saveMusicSettings()
     }
@@ -266,6 +297,54 @@ final class CineoEditorModel: ObservableObject {
         musicCues.removeAll { $0.id == id }
         suggestedCueCamera = nil
         saveMusicSettings()
+    }
+
+    func updateCueSound(_ id: String, enabled: Bool? = nil, volume: Double? = nil) {
+        guard !isExporting, let index = musicCues.firstIndex(where: { $0.id == id }) else { return }
+        let before = musicCues
+        if let enabled { musicCues[index].soundEnabled = enabled }
+        if let volume { musicCues[index].soundVolume = min(1, max(0, volume)) }
+        do {
+            _ = try CineoCueSoundPlanner.plan(cues: musicCues, videoDuration: duration)
+            saveMusicSettings()
+        } catch {
+            musicCues = before
+            musicStatus = error.localizedDescription
+        }
+    }
+
+    private func playCueSound(_ event: CineoCueSoundEvent) {
+        do {
+            let player = try AVAudioPlayer(data: CineoProceduralCueAudio.wav(event: event))
+            player.volume = Float(event.volume)
+            player.prepareToPlay()
+            cuePreviewPlayers.removeAll { !$0.isPlaying }
+            cuePreviewPlayers.append(player)
+            player.play()
+        } catch {
+            musicStatus = "Anteprima effetto cue non disponibile: \(error.localizedDescription)"
+        }
+    }
+
+    func previewCueSound(_ id: String) {
+        do {
+            let events = try CineoCueSoundPlanner.plan(
+                cues: musicCues, videoDuration: duration)
+            guard let event = events.first(where: { $0.id == id }) else { return }
+            playCueSound(event)
+        } catch { musicStatus = error.localizedDescription }
+    }
+
+    private func synchronizeCueSoundPreview(at time: Double) {
+        guard isPreviewPlaying else { return }
+        let previous = lastCuePreviewTime ?? (time - 0.001)
+        lastCuePreviewTime = time
+        guard time >= previous, time - previous <= 0.6,
+              let events = try? CineoCueSoundPlanner.plan(
+                cues: musicCues, videoDuration: duration) else { return }
+        for cue in events where cue.start > previous && cue.start <= time + 0.01 {
+            playCueSound(cue)
+        }
     }
 
     /// Convert a manually authored cue into a camera edit only after preview
@@ -570,6 +649,71 @@ final class CineoEditorModel: ObservableObject {
         }
     }
 
+    /// Mark an exact interval on the *video* timeline. The pure Swift
+    /// contract maps to source time and rejects loop seam crossings.
+    func markRepaintStart() {
+        repaintStart = selectedTime
+        if repaintEnd <= repaintStart { repaintEnd = min(duration, repaintStart + 4) }
+    }
+
+    func markRepaintEnd() {
+        repaintEnd = selectedTime
+    }
+
+    func repaintMusicSelection() {
+        guard let original = musicURL, !isGeneratingMusic, !isExporting else { return }
+        let request: CineoACERepaintRequest
+        do {
+            request = try .fromVideoSelection(
+                start: repaintStart, end: repaintEnd, clip: musicClip,
+                offset: musicSettings.offset, sourceDuration: effectiveSourceDuration,
+                videoDuration: duration, prompt: musicSettings.caption, seed: musicSettings.seed)
+            guard ["wav", "mp3"].contains(original.pathExtension.lowercased()) else {
+                throw CineoMusicError.invalid(
+                    "Repaint ACE-Step accetta WAV o MP3. Importa la traccia in uno di questi formati.")
+            }
+        } catch {
+            musicStatus = error.localizedDescription
+            return
+        }
+        let destination = musicDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+        isGeneratingMusic = true
+        musicStatus = String(format:
+            "Repaint ACE-Step da %.2f a %.2f s della sorgente. Audio originale intatto.",
+            request.sourceStart, request.sourceEnd)
+        musicTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let client = try CineoACEClient()
+                try await client.repaint(request: request, source: original,
+                                         destination: destination) { message in
+                    Task { @MainActor [weak self] in self?.musicStatus = message }
+                }
+                try Task.checkCancellation()
+                guard self.musicURL == original else {
+                    try? FileManager.default.removeItem(at: destination)
+                    throw CineoMusicError.invalid(
+                        "La traccia è cambiata durante il repaint. Risultato non applicato.")
+                }
+                // Only after successful WAV validation do we switch the
+                // active reference. The old source file is never removed.
+                self.musicAsset = CineoMusicAsset(
+                    fileName: destination.lastPathComponent, settings: self.musicSettings)
+                self.musicDisplayName = "Repaint · (Int(request.sourceStart))–(Int(request.sourceEnd)) s"
+                self.prepareMusicPlayer()
+                self.saveMusicSettings()
+                self.musicStatus = "Repaint pronto. La vecchia traccia resta in Media."
+            } catch is CancellationError {
+                try? FileManager.default.removeItem(at: destination)
+                self.musicStatus = "Repaint annullato; musica originale intatta."
+            } catch {
+                self.musicStatus = "Repaint non applicato: (error.localizedDescription)"
+            }
+            self.isGeneratingMusic = false
+            self.musicTask = nil
+        }
+    }
+
     func cancelMusicGeneration() { musicTask?.cancel() }
 
     func importMusicDialog() {
@@ -831,11 +975,14 @@ final class CineoEditorModel: ObservableObject {
                 duckingSettings = CineoDuckingSettings(
                     enabled: music.duckingEnabled ?? false,
                     level: music.duckingLevel ?? 0.25,
-                    threshold: music.duckingThreshold ?? 0.08)
+                    threshold: music.duckingThreshold ?? 0.08,
+                    detectionMode: music.duckingMode.flatMap(CineoDuckingDetectionMode.init(rawValue:)))
                 if let importedCues = music.cues {
                     musicCues = importedCues.compactMap { cue in
                         guard let kind = CineoMusicCueKind(rawValue: cue.kind) else { return nil }
-                        return CineoMusicCue(id: cue.id, at: cue.at, kind: kind, label: cue.label)
+                        return CineoMusicCue(id: cue.id, at: cue.at, kind: kind,
+                            label: cue.label, soundEnabled: cue.soundEnabled,
+                            soundVolume: cue.soundVolume)
                     }
                 }
                 if duckingSettings.enabled { analyzeOriginalAudioActivity() }
@@ -1124,12 +1271,16 @@ final class CineoEditorModel: ObservableObject {
         loadingPreview = false
         status = "Anteprima Play: frame già composti con gli effetti Cineo, senza esportazione."
         player.play()
+        lastCuePreviewTime = selectedTime - 0.001
         synchronizeMusic(at: selectedTime)
     }
 
     func pausePreviewPlayback() {
         musicPlayer?.pause()
         musicCrossfadePlayer?.pause()
+        for player in cuePreviewPlayers { player.stop() }
+        cuePreviewPlayers.removeAll()
+        lastCuePreviewTime = nil
         guard isPreviewPlaying else { return }
         previewPlayer?.pause()
         isPreviewPlaying = false
@@ -1151,6 +1302,7 @@ final class CineoEditorModel: ObservableObject {
         }
         selectedTime = seconds
         synchronizeMusic(at: seconds)
+        synchronizeCueSoundPreview(at: seconds)
         guard output.hasNewPixelBuffer(forItemTime: timestamp),
               let buffer = output.copyPixelBuffer(forItemTime: timestamp,
                                                   itemTimeForDisplay: nil) else { return }
@@ -1196,6 +1348,15 @@ final class CineoEditorModel: ObservableObject {
         let exportMusicClip = musicClip
         let exportDucking = duckingSettings
         let exportDuckingRanges = musicDuckingRanges
+        let exportHasSpeechWindows = likelySpeechWindows != nil
+        let exportCueSounds: [CineoCueSoundEvent]
+        do {
+            exportCueSounds = try CineoCueSoundPlanner.plan(
+                cues: musicCues, videoDuration: duration)
+        } catch {
+            status = "Effetti cue non validi: (error.localizedDescription)"
+            return
+        }
         let folder = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Cineo/Edited", isDirectory: true)
         do {
@@ -1225,16 +1386,26 @@ final class CineoEditorModel: ObservableObject {
                 let hasOriginalAudio = !(try await originalAsset.loadTracks(withMediaType: .audio)).isEmpty
                 var resolvedDuckingRanges = exportDuckingRanges
                 if exportMusicURL != nil && exportDucking.enabled && hasOriginalAudio
-                    && originalAudioAnalysis == nil {
+                    && (originalAudioAnalysis == nil
+                        || (exportDucking.detectionMode == .likelySpeech && !exportHasSpeechWindows)) {
                     status = "Analizzo l'attività audio originale prima del mix…"
                     let analysis = try await CineoMusicAudioAnalyzer.analyze(url: url)
                     try Task.checkCancellation()
-                    resolvedDuckingRanges = CineoAudioActivityDetector.ranges(
+                    let activity = CineoAudioActivityDetector.ranges(
                         peakBins: analysis.activityLevels,
                         duration: analysis.sourceDuration,
                         threshold: exportDucking.threshold)
+                    if exportDucking.detectionMode == .likelySpeech {
+                        status = "Classifico il parlato probabile sul Mac prima dell'export…"
+                        let likelySpeech = try await CineoLikelySpeechClassifier.ranges(url: url)
+                        try Task.checkCancellation()
+                        resolvedDuckingRanges = CineoLikelySpeechGate.intersection(
+                            activity: activity, speechWindows: likelySpeech)
+                    } else {
+                        resolvedDuckingRanges = activity
+                    }
                 }
-                if exportMusicURL != nil || hasOriginalAudio {
+                if exportMusicURL != nil || hasOriginalAudio || !exportCueSounds.isEmpty {
                     status = "Composizione audio/video e applicazione fade…"
                     try await CineoAudioMuxer.mux(
                         video: videoOnly, original: url,
@@ -1242,7 +1413,7 @@ final class CineoEditorModel: ObservableObject {
                         settings: exportMusicURL == nil ? nil : exportMusicSettings,
                         clip: exportMusicClip,
                         ducking: exportDucking, duckingRanges: resolvedDuckingRanges,
-                        destination: dest)
+                        cueSounds: exportCueSounds, destination: dest)
                 } else {
                     try FileManager.default.moveItem(at: videoOnly, to: dest)
                 }
@@ -1577,9 +1748,12 @@ private struct CineoInstructionsDialog: View {
                 duckingEnabled: editor.duckingSettings.enabled,
                 duckingLevel: editor.duckingSettings.level,
                 duckingThreshold: editor.duckingSettings.threshold,
+                duckingMode: (editor.duckingSettings.detectionMode ?? .anyAudio).rawValue,
                 cues: editor.musicCues.map { cue in
                     CineoInstructionDocument.Music.Cue(
-                        id: cue.id, at: cue.at, kind: cue.kind.rawValue, label: cue.label)
+                        id: cue.id, at: cue.at, kind: cue.kind.rawValue,
+                        label: cue.label, soundEnabled: cue.soundEnabled,
+                        soundVolume: cue.soundVolume)
                 })
             root["music"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(instruction))
             let data = try JSONSerialization.data(withJSONObject: root,

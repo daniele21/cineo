@@ -9,6 +9,7 @@ public enum CineoAudioMuxer {
                     settings: CineoMusicSettings?, clip: CineoMusicClip = .init(),
                     ducking: CineoDuckingSettings = .init(),
                     duckingRanges: [CineoAudioActivityRange] = [],
+                    cueSounds: [CineoCueSoundEvent] = [],
                     destination: URL) async throws {
         let videoAsset = AVURLAsset(url: video)
         let vTracks = try await videoAsset.loadTracks(withMediaType: .video)
@@ -158,6 +159,48 @@ public enum CineoAudioMuxer {
                 }
                 parameters.append(p)
             }
+        }
+
+        // Explicit non-destructive local Foley. Each enabled cue gets an
+        // isolated composition track, allowing nearby hit/transition sounds
+        // to overlap without mutating the source or the generated music.
+        guard cueSounds.count <= CineoCueSoundPlanner.maximumEvents else {
+            throw CineoMusicError.invalid("Troppi effetti sonori nel montaggio.")
+        }
+        let cueTemp = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "cineo-cue-sound-" + UUID().uuidString, isDirectory: true)
+        if !cueSounds.isEmpty {
+            try FileManager.default.createDirectory(at: cueTemp, withIntermediateDirectories: true)
+        }
+        defer { try? FileManager.default.removeItem(at: cueTemp) }
+        for (index, event) in cueSounds.enumerated() {
+            try Task.checkCancellation()
+            guard event.start.isFinite, event.duration.isFinite, event.volume.isFinite,
+                  event.start >= 0, event.start + event.duration <= duration.seconds + 0.00001,
+                  event.duration > 0.015, event.duration <= 1,
+                  (0...1).contains(event.volume) else {
+                throw CineoMusicError.invalid("Posizione o volume effetto cue non valido.")
+            }
+            let path = cueTemp.appendingPathComponent("cue-" + String(index) + ".wav")
+            try CineoProceduralCueAudio.wav(event: event).write(to: path, options: .atomic)
+            let asset = AVURLAsset(url: path)
+            guard let sourceTrack = try await asset.loadTracks(withMediaType: .audio).first,
+                  let track = composition.addMutableTrack(
+                      withMediaType: .audio,
+                      preferredTrackID: kCMPersistentTrackID_Invalid) else {
+                throw CineoMusicError.invalid("Impossibile creare la traccia audio del cue.")
+            }
+            let audioDuration = try await asset.load(.duration)
+            let length = min(event.duration, audioDuration.seconds, duration.seconds - event.start)
+            guard length > 0.015 else { continue }
+            try track.insertTimeRange(
+                CMTimeRange(start: .zero,
+                            duration: CMTime(seconds: length, preferredTimescale: 6000)),
+                of: sourceTrack, at: CMTime(seconds: event.start, preferredTimescale: 6000))
+            let param = AVMutableAudioMixInputParameters(track: track)
+            let startTime = CMTime(seconds: event.start, preferredTimescale: 6000)
+            param.setVolume(Float(event.volume), at: startTime)
+            parameters.append(param)
         }
 
         guard !parameters.isEmpty else {

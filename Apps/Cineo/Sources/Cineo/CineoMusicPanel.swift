@@ -175,6 +175,11 @@ struct CineoMusicPanel: View {
                 set: { editor.updateDucking(threshold: $0) })
     }
 
+    private var duckModeBinding: Binding<CineoDuckingDetectionMode> {
+        Binding(get: { editor.duckingSettings.detectionMode ?? .anyAudio },
+                set: { editor.updateDucking(mode: $0) })
+    }
+
     private var cueKindBinding: Binding<CineoMusicCueKind> {
         Binding(get: { editor.selectedCueKind },
                 set: { editor.selectedCueKind = $0 })
@@ -347,9 +352,50 @@ struct CineoMusicPanel: View {
                 Spacer()
             }.textFieldStyle(.roundedBorder)
             Divider()
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Rigenerazione parziale ACE-Step").font(.headline)
+                Text("Seleziona un intervallo del video: Cineo lo traduce nella sorgente musicale. Il modello modifica solo quella regione, lasciando intatta la traccia originale.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text("Da")
+                    TextField("s", value: $editor.repaintStart,
+                              format: .number.precision(.fractionLength(0...2)))
+                        .frame(width: 66)
+                    Button("Playhead") { editor.markRepaintStart() }
+                    Text("a")
+                    TextField("s", value: $editor.repaintEnd,
+                              format: .number.precision(.fractionLength(0...2)))
+                        .frame(width: 66)
+                    Button("Playhead") { editor.markRepaintEnd() }
+                    Spacer()
+                }.textFieldStyle(.roundedBorder).controlSize(.small)
+                HStack(spacing: 10) {
+                    Button("Rigenera solo l'intervallo") {
+                        editor.repaintMusicSelection()
+                    }
+                    .disabled(editor.isGeneratingMusic || editor.isExporting
+                        || editor.musicURL == nil)
+                    Text("WAV / MP3 · senza LM · nessun file sovrascritto")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Text("I loop e i crossfade non possono essere attraversati dalla selezione; usa un intervallo continuo di almeno 1 secondo.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Divider()
             Toggle("Ducking durante l'audio originale", isOn: duckEnabledBinding)
                 .disabled(editor.isExporting)
             if editor.duckingSettings.enabled {
+                HStack(spacing: 10) {
+                    Picker("Quando abbassare", selection: duckModeBinding) {
+                        Text("Qualsiasi audio").tag(CineoDuckingDetectionMode.anyAudio)
+                        Text("Parlato probabile").tag(CineoDuckingDetectionMode.likelySpeech)
+                    }.frame(width: 290)
+                    Spacer()
+                }
+                if editor.duckingSettings.detectionMode == .likelySpeech {
+                    Text("Usa SoundAnalysis integrato in macOS. Non trascrive né invia audio online; il riconoscimento è probabilistico e può confondere alcuni suoni con la voce.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 HStack {
                     Text("Volume musica").frame(width: 105, alignment: .leading)
                     Slider(value: duckLevelBinding, in: 0...1)
@@ -362,7 +408,9 @@ struct CineoMusicPanel: View {
                     Text(String(format: "%.2f", editor.duckingSettings.threshold))
                         .font(.caption.monospacedDigit()).frame(width: 60)
                 }
-                Text("\(editor.musicDuckingRanges.count) intervalli attivi. Analisi di volume, non riconoscimento della voce: anche i suoni di sistema possono attivare il ducking.")
+                Text(editor.duckingSettings.detectionMode == .likelySpeech
+                     ? "\(editor.musicDuckingRanges.count) intervalli di possibile parlato (classificazione locale + RMS)."
+                     : "\(editor.musicDuckingRanges.count) intervalli di attività audio. I suoni di sistema possono attivare il ducking.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             Divider()
@@ -388,6 +436,19 @@ struct CineoMusicPanel: View {
                                 editor.proposeCueCamera(cue.id)
                             }.disabled(editor.isExporting)
                               .help("Propone un'animazione di camera sul cue, senza modificare il video")
+                            Button(cue.soundEnabled == true ? "SFX attivo" : "Aggiungi SFX") {
+                                editor.updateCueSound(cue.id, enabled: cue.soundEnabled != true)
+                            }.disabled(editor.isExporting)
+                            if cue.soundEnabled == true {
+                                Slider(value: Binding(
+                                    get: { editor.musicCues.first(where: { $0.id == cue.id })?.soundVolume ?? 0.28 },
+                                    set: { editor.updateCueSound(cue.id, volume: $0) }),
+                                    in: 0...1)
+                                    .frame(width: 70)
+                                    .help("Volume effetto sonoro")
+                                Button("Ascolta") { editor.previewCueSound(cue.id) }
+                                    .disabled(editor.isExporting)
+                            }
                             Button { editor.removeMusicCue(cue.id) } label: {
                                 Image(systemName: "xmark.circle")
                             }.help("Elimina cue")
@@ -408,7 +469,7 @@ struct CineoMusicPanel: View {
                     }
                 }
             }
-            Text("I cue possono creare zoom e transizioni solo previa conferma. Non sono effetti audio.")
+            Text("Gli effetti Hit, Crescendo e Transizione sono sintetizzati localmente. Ogni cue va abilitato esplicitamente; anteprima ed MP4 usano la stessa forma d'onda.")
                 .font(.caption2).foregroundStyle(.secondary)
             Divider()
             HStack {

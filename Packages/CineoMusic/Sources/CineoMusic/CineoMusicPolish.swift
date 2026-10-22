@@ -2,20 +2,29 @@ import Foundation
 
 /// Music-volume automation while the recording's original audio is active.
 /// This is an amplitude gate, not speaker/voice identification.
+public enum CineoDuckingDetectionMode: String, Codable, CaseIterable, Sendable {
+    case anyAudio
+    case likelySpeech
+}
+
 public struct CineoDuckingSettings: Codable, Equatable, Sendable {
     public var enabled: Bool
     public var level: Double
     public var threshold: Double
     public var attack: Double
     public var release: Double
+    /// Optional for compatibility with prior music.json project files.
+    public var detectionMode: CineoDuckingDetectionMode?
 
     public init(enabled: Bool = false, level: Double = 0.25, threshold: Double = 0.08,
-                attack: Double = 0.20, release: Double = 0.55) {
+                attack: Double = 0.20, release: Double = 0.55,
+                detectionMode: CineoDuckingDetectionMode? = nil) {
         self.enabled = enabled
         self.level = level
         self.threshold = threshold
         self.attack = attack
         self.release = release
+        self.detectionMode = detectionMode
     }
 
     public func validate() throws {
@@ -126,19 +135,26 @@ public struct CineoMusicCue: Codable, Equatable, Identifiable, Sendable {
     public var at: Double
     public var kind: CineoMusicCueKind
     public var label: String
+    /// Nil means disabled for backward-compatible project files.
+    public var soundEnabled: Bool?
+    public var soundVolume: Double?
 
     public init(id: String = UUID().uuidString, at: Double, kind: CineoMusicCueKind,
-                label: String = "") {
+                label: String = "", soundEnabled: Bool? = nil, soundVolume: Double? = nil) {
         self.id = id
         self.at = at
         self.kind = kind
         self.label = label
+        self.soundEnabled = soundEnabled
+        self.soundVolume = soundVolume
     }
 
     public func validate(videoDuration: Double) throws {
         guard !id.isEmpty, id.count < 100,
               at.isFinite, at >= 0, at < videoDuration,
-              label.utf8.count <= 80 else {
+              label.utf8.count <= 80,
+              soundVolume == nil || (soundVolume!.isFinite && (0...1).contains(soundVolume!))
+              else {
             throw CineoMusicError.invalid("Cue musicale non valido.")
         }
     }
