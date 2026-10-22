@@ -66,6 +66,8 @@ jobs:
             echo 'ERROR: SwiftUI @State macro requires unavailable CLT SwiftUIMacros. Use @StateObject with an ObservableObject.' >&2
             exit 1
           fi
+      - name: ACE watchdog graceful and SIGKILL owner lifecycle smoke
+        run: bash scripts/test-cineo-engine-lifecycle.sh
       - name: Build integrated SwiftUI Cineo Dev app without Xcode
         run: |
           swift build --package-path Apps/Cineo --configuration release
