@@ -172,6 +172,8 @@ struct CineoMusicPanel: View {
                         trackSection
                         Divider()
                     }
+                    CineoACEBackendPanel(backend: editor.aceBackend)
+                    Divider()
                     Text("Genera musica locale con ACE-Step").font(.headline)
                     Text("Descrivi genere, strumenti e atmosfera. I suggerimenti LLM restano disattivati.")
                         .font(.caption).foregroundStyle(.secondary)
