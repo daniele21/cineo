@@ -975,11 +975,14 @@ final class CineoEditorModel: ObservableObject {
                 duckingSettings = CineoDuckingSettings(
                     enabled: music.duckingEnabled ?? false,
                     level: music.duckingLevel ?? 0.25,
-                    threshold: music.duckingThreshold ?? 0.08)
+                    threshold: music.duckingThreshold ?? 0.08,
+                    detectionMode: music.duckingMode.flatMap(CineoDuckingDetectionMode.init(rawValue:)))
                 if let importedCues = music.cues {
                     musicCues = importedCues.compactMap { cue in
                         guard let kind = CineoMusicCueKind(rawValue: cue.kind) else { return nil }
-                        return CineoMusicCue(id: cue.id, at: cue.at, kind: kind, label: cue.label)
+                        return CineoMusicCue(id: cue.id, at: cue.at, kind: kind,
+                            label: cue.label, soundEnabled: cue.soundEnabled,
+                            soundVolume: cue.soundVolume)
                     }
                 }
                 if duckingSettings.enabled { analyzeOriginalAudioActivity() }
@@ -1745,9 +1748,12 @@ private struct CineoInstructionsDialog: View {
                 duckingEnabled: editor.duckingSettings.enabled,
                 duckingLevel: editor.duckingSettings.level,
                 duckingThreshold: editor.duckingSettings.threshold,
+                duckingMode: (editor.duckingSettings.detectionMode ?? .anyAudio).rawValue,
                 cues: editor.musicCues.map { cue in
                     CineoInstructionDocument.Music.Cue(
-                        id: cue.id, at: cue.at, kind: cue.kind.rawValue, label: cue.label)
+                        id: cue.id, at: cue.at, kind: cue.kind.rawValue,
+                        label: cue.label, soundEnabled: cue.soundEnabled,
+                        soundVolume: cue.soundVolume)
                 })
             root["music"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(instruction))
             let data = try JSONSerialization.data(withJSONObject: root,
