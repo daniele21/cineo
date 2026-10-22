@@ -9,6 +9,7 @@ import CoreImage
 import CineoScene
 import CineoProject
 import CineoMusic
+import CineoAudio
 import CryptoKit
 
 @MainActor
