@@ -10,6 +10,7 @@ import CineoMusic
 final class CineoMusicJobQueue: ObservableObject {
     @Published private(set) var jobs: [CineoMusicQueueJob] = []
     @Published private(set) var activeID: UUID?
+    @Published private(set) var persistenceError: String?
 
     private let store: URL
     private let outputs: URL
@@ -22,15 +23,28 @@ final class CineoMusicJobQueue: ObservableObject {
             .appendingPathComponent("Cineo", isDirectory: true)
         self.store = dir.appendingPathComponent("music-job-queue.json")
         self.outputs = dir.appendingPathComponent("MusicJobs", isDirectory: true)
-        if let data = try? Data(contentsOf: store),
-           let stored = try? JSONDecoder().decode([CineoMusicQueueJob].self, from: data) {
-            jobs = Array(stored.prefix(maxJobs))
-            for index in jobs.indices {
-                jobs[index].recoverAfterAppRestart(
-                    outputExists: FileManager.default.fileExists(
-                        atPath: jobs[index].destinationPath))
+        if FileManager.default.fileExists(atPath: store.path) {
+            do {
+                let data = try Data(contentsOf: store)
+                guard data.count < 2_000_000 else {
+                    throw CineoMusicError.invalid("Cronologia di job troppo grande.")
+                }
+                let stored = try JSONDecoder().decode([CineoMusicQueueJob].self, from: data)
+                guard stored.count <= maxJobs else {
+                    throw CineoMusicError.invalid("Numero di job nella coda non valido.")
+                }
+                jobs = stored
+                for index in jobs.indices {
+                    jobs[index].recoverAfterAppRestart(
+                        outputExists: FileManager.default.fileExists(
+                            atPath: jobs[index].destinationPath))
+                }
+                save()
+            } catch {
+                // Never silently replace a damaged queue with an empty one.
+                // Keep the original file available for manual recovery.
+                persistenceError = "Impossibile leggere la coda salvata: \(error.localizedDescription). File originale preservato."
             }
-            save()
         }
         Task { [weak self] in self?.pump() }
     }
@@ -54,6 +68,9 @@ final class CineoMusicJobQueue: ObservableObject {
     private func enqueue(kind: CineoMusicQueueJob.Kind, settings: CineoMusicSettings,
                          videoURL: URL, label: String, repaint: CineoACERepaintRequest?,
                          source: URL?) throws {
+        guard persistenceError == nil else {
+            throw CineoMusicError.unavailable("Coda non disponibile: ripristina prima il file music-job-queue.json.")
+        }
         guard videoURL.isFileURL, source == nil || source!.isFileURL else {
             throw CineoMusicError.invalid("Le sorgenti della coda devono essere file locali.")
         }
@@ -131,7 +148,7 @@ final class CineoMusicJobQueue: ObservableObject {
     }
 
     private func pump() {
-        guard running == nil,
+        guard persistenceError == nil, running == nil,
               let next = jobs.last(where: { $0.phase == .queued }) else { return }
         activeID = next.id
         running = Task { [weak self] in await self?.execute(next.id) }
@@ -225,7 +242,10 @@ final class CineoMusicJobQueue: ObservableObject {
 
     private func save() {
         do { try saveOrThrow() }
-        catch { NSLog("Cineo music job queue: cannot save state: %@", error.localizedDescription) }
+        catch {
+            persistenceError = "Salvataggio coda non riuscito: \(error.localizedDescription)"
+            NSLog("Cineo music job queue: cannot save state: %@", error.localizedDescription)
+        }
     }
 
     private func saveOrThrow() throws {
