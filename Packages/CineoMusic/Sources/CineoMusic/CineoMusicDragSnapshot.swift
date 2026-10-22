@@ -1,6 +1,6 @@
 import Foundation
 
-public enum CineoMusicDragHandle: Sendable {
+public enum CineoMusicDragHandle: Equatable, Sendable {
     case move, trimStart, trimEnd
 }
 
