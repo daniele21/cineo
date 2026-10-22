@@ -166,6 +166,30 @@ public struct CineoBeatKeyframe: Equatable, Sendable {
 /// Chooses actual detected musical transients near a camera focus peak.
 /// BPM alone is not treated as measured beat timing.
 public enum CineoBeatSync {
+    /// Explicit manual cue alignment; no rhythm detection is required.
+    /// Returns a proposal only if a selected zoom peak remains ordered.
+    public static func proposeToTime(keyframes: [CineoBeatKeyframe],
+                                     playhead: Double, targetTime: Double,
+                                     maxShift: Double = 0.60) -> CineoBeatAlignment? {
+        guard playhead.isFinite, targetTime.isFinite, maxShift.isFinite,
+              maxShift > 0 else { return nil }
+        let candidates = keyframes.indices.filter { i in
+            keyframes[i].zoom > 1.02 &&
+            abs(keyframes[i].time - playhead) <= 0.75 &&
+            (i == 0 || keyframes[i].zoom > keyframes[i - 1].zoom + 0.015)
+        }
+        guard let i = candidates.min(by: {
+            abs(keyframes[$0].time - playhead) < abs(keyframes[$1].time - playhead)
+        }), abs(targetTime - keyframes[i].time) <= maxShift,
+            abs(targetTime - keyframes[i].time) > 0.005,
+            targetTime >= 0,
+            (i == 0 || targetTime > keyframes[i - 1].time + 0.06),
+            (i + 1 == keyframes.count || targetTime < keyframes[i + 1].time - 0.06)
+        else { return nil }
+        return CineoBeatAlignment(keyframeIndex: i,
+                                  from: keyframes[i].time, to: targetTime)
+    }
+
     public static func propose(keyframes: [CineoBeatKeyframe], playhead: Double,
                                onsetSeconds: [Double], clip: CineoMusicClip,
                                sourceDuration: Double, videoDuration: Double,
@@ -183,25 +207,17 @@ public enum CineoBeatSync {
         let playable = clip.effectiveDuration(sourceDuration: sourceDuration,
                                                videoDuration: videoDuration, offset: offset)
         guard playable > 0, sourceDuration > clip.sourceIn else { return nil }
-        let cycle = sourceDuration - clip.sourceIn
+        guard let segments = try? clip.arrangedSegments(sourceDuration: sourceDuration,
+                                                         videoDuration: videoDuration,
+                                                         offset: offset) else { return nil }
         var best: Double?
-        for onset in onsetSeconds where onset.isFinite && onset >= clip.sourceIn && onset < sourceDuration {
-            let withinCycle = onset - clip.sourceIn
-            if clip.loop {
-                var k = 0
-                while Double(k) * cycle + withinCycle < playable {
-                    let candidate = offset + Double(k) * cycle + withinCycle
-                    if abs(candidate - original) <= maxShift &&
-                       (best == nil || abs(candidate - original) < abs(best! - original)) {
-                        best = candidate
-                    }
-                    k += 1
-                    if k > 4096 { break }
-                }
-            } else {
-                let candidate = offset + withinCycle
-                if candidate < offset + playable, abs(candidate - original) <= maxShift &&
-                    (best == nil || abs(candidate - original) < abs(best! - original)) {
+        for part in segments {
+            for onset in onsetSeconds where onset.isFinite &&
+                    onset >= part.sourceStart &&
+                    onset < part.sourceStart + part.duration {
+                let candidate = part.timelineStart + onset - part.sourceStart
+                if abs(candidate - original) <= maxShift &&
+                   (best == nil || abs(candidate - original) < abs(best! - original)) {
                     best = candidate
                 }
             }
