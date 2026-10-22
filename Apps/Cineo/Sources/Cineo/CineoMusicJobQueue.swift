@@ -153,8 +153,9 @@ final class CineoMusicJobQueue: ObservableObject {
         let snapshot = jobs[i]
         do {
             let client = try CineoACEClient()
-            let checkpoint: @Sendable (CineoACEJobCheckpoint) async -> Void = { [weak self] point in
-                await self?.setCheckpoint(point, for: id)
+            let checkpoint: @Sendable (CineoACEJobCheckpoint) async throws -> Void = { [weak self] point in
+                guard let self else { throw CancellationError() }
+                try await self.setCheckpoint(point, for: id)
             }
             let progress: @Sendable (String) -> Void = { [weak self] message in
                 Task { @MainActor [weak self] in self?.setStatus(message, for: id) }
@@ -201,12 +202,18 @@ final class CineoMusicJobQueue: ObservableObject {
         }
     }
 
-    private func setCheckpoint(_ point: CineoACEJobCheckpoint, for id: UUID) {
+    private func setCheckpoint(_ point: CineoACEJobCheckpoint, for id: UUID) throws {
         guard let index = jobs.firstIndex(where: { $0.id == id }),
-              jobs[index].phase == .running else { return }
+              jobs[index].phase == .running else { throw CancellationError() }
+        let previous = jobs[index]
         jobs[index].checkpoint = point
         jobs[index].status = "ACE-Step · \(point.stage.rawValue) · job \(point.remoteID)"
-        save()
+        do { try saveOrThrow() }
+        catch {
+            jobs[index] = previous
+            throw CineoMusicError.unavailable(
+                "Non posso salvare il checkpoint del job sul disco: \(error.localizedDescription)")
+        }
     }
 
     private func setStatus(_ message: String, for id: UUID) {
