@@ -972,7 +972,13 @@ final class CineoEditorModel: ObservableObject {
                     try FileManager.default.copyItem(at: originalMusic, to: copied)
                 }
                 if let pointerSidecar {
-                    try CineoPointerSidecarStore().save(pointerSidecar, projectURL: location)
+                    do {
+                        try CineoPointerSidecarStore().save(pointerSidecar, projectURL: location)
+                    } catch {
+                        // Click telemetry is optional. A valid project and its
+                        // imported source media must not be discarded for it.
+                        status = "Progetto salvato senza telemetria click: \(error.localizedDescription)"
+                    }
                 }
                 musicQueue.relinkVideo(from: source, to: savedSource)
                 projectURL = location

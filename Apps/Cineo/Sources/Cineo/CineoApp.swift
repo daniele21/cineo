@@ -531,10 +531,15 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
             try activeStream.addRecordingOutput(activeOutput)
             if captureClickEvents {
                 let anchor = CineoFirstFrameObserver()
-                try activeStream.addStreamOutput(
-                    anchor, type: .screen,
-                    sampleHandlerQueue: DispatchQueue(label: "com.cineo.pointer.frame-anchor"))
-                firstFrameObserver = anchor
+                do {
+                    try activeStream.addStreamOutput(
+                        anchor, type: .screen,
+                        sampleHandlerQueue: DispatchQueue(label: "com.cineo.pointer.frame-anchor"))
+                    firstFrameObserver = anchor
+                } catch {
+                    log("Telemetria click non disponibile: \(error.localizedDescription). Registrazione video invariata.",
+                        level: .warning)
+                }
             }
             // Retain objects before starting, including during asynchronous
             // delegate callbacks or an early stream failure.
@@ -545,7 +550,7 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
             if phase == .preparing {
                 phase = .recording
                 status = "Registrazione attiva. Premi Stop per terminare."
-                if captureClickEvents {
+                if captureClickEvents && firstFrameObserver != nil {
                     // Global NSEvent uses host uptime and never captures typed text.
                     let screen = NSScreen.screens.first {
                         ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
