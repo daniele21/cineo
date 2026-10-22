@@ -171,13 +171,15 @@ public enum CineoBeatSync {
                                                videoDuration: videoDuration, offset: offset)
         guard playable > 0, sourceDuration > clip.sourceIn else { return nil }
         let cycle = sourceDuration - clip.sourceIn
+        let repeatStride = cycle - (clip.loop ? clip.loopCrossfade : 0)
+        guard repeatStride > 0 else { return nil }
         var best: Double?
         for onset in onsetSeconds where onset.isFinite && onset >= clip.sourceIn && onset < sourceDuration {
             let withinCycle = onset - clip.sourceIn
             if clip.loop {
                 var k = 0
-                while Double(k) * cycle + withinCycle < playable {
-                    let candidate = offset + Double(k) * cycle + withinCycle
+                while Double(k) * repeatStride + withinCycle < playable {
+                    let candidate = offset + Double(k) * repeatStride + withinCycle
                     if abs(candidate - original) <= maxShift &&
                        (best == nil || abs(candidate - original) < abs(best! - original)) {
                         best = candidate
