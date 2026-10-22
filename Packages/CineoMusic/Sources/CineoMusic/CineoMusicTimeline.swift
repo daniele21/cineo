@@ -6,11 +6,27 @@ public struct CineoMusicClip: Codable, Equatable, Sendable {
     public var sourceIn: Double
     public var duration: Double?
     public var loop: Bool
+    /// Overlap between successive repeats, in seconds. 0 retains legacy hard looping.
+    public var loopCrossfade: Double
 
-    public init(sourceIn: Double = 0, duration: Double? = nil, loop: Bool = false) {
+    public init(sourceIn: Double = 0, duration: Double? = nil, loop: Bool = false,
+                loopCrossfade: Double = 0) {
         self.sourceIn = sourceIn
         self.duration = duration
         self.loop = loop
+        self.loopCrossfade = loopCrossfade
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sourceIn, duration, loop, loopCrossfade
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sourceIn = try c.decodeIfPresent(Double.self, forKey: .sourceIn) ?? 0
+        duration = try c.decodeIfPresent(Double.self, forKey: .duration)
+        loop = try c.decodeIfPresent(Bool.self, forKey: .loop) ?? false
+        loopCrossfade = try c.decodeIfPresent(Double.self, forKey: .loopCrossfade) ?? 0
     }
 
     public func validate(sourceDuration: Double, videoDuration: Double, offset: Double) throws {
@@ -18,8 +34,11 @@ public struct CineoMusicClip: Codable, Equatable, Sendable {
               videoDuration.isFinite, videoDuration > 0,
               offset.isFinite, offset >= 0, offset < videoDuration,
               sourceIn.isFinite, sourceIn >= 0, sourceIn < sourceDuration - 0.02,
-              duration == nil || (duration!.isFinite && duration! >= 0.04)
-        else { throw CineoMusicError.invalid("Taglio musicale: durata, posizione o sorgente non valida.") }
+              duration == nil || (duration!.isFinite && duration! >= 0.04),
+              loopCrossfade.isFinite, loopCrossfade >= 0,
+              loopCrossfade <= 2,
+              loopCrossfade <= (sourceDuration - sourceIn) / 2
+        else { throw CineoMusicError.invalid("Taglio/loop musicale: durata, origine o crossfade non validi.") }
     }
 
     public func effectiveDuration(sourceDuration: Double, videoDuration: Double, offset: Double) -> Double {
@@ -34,32 +53,72 @@ public struct CineoMusicClip: Codable, Equatable, Sendable {
         try validate(sourceDuration: sourceDuration, videoDuration: videoDuration, offset: offset)
         let total = effectiveDuration(sourceDuration: sourceDuration, videoDuration: videoDuration, offset: offset)
         guard total >= 0.04 else { return [] }
-        let sourceLoop = sourceDuration - sourceIn
+        let cycle = sourceDuration - sourceIn
+        let overlap = loop ? loopCrossfade : 0
+        let strideSeconds = cycle - overlap
         var elapsed = 0.0
         var segments: [CineoMusicSegment] = []
         while elapsed < total - 0.000001 {
             guard segments.count < 4096 else {
                 throw CineoMusicError.invalid("Loop musicale troppo breve: supera 4096 ripetizioni.")
             }
-            let part = min(sourceLoop, total - elapsed)
+            let part = min(cycle, total - elapsed)
             guard part > 0.000001 else { break }
-            segments.append(CineoMusicSegment(sourceStart: sourceIn, timelineStart: offset + elapsed,
+            segments.append(CineoMusicSegment(sourceStart: sourceIn,
+                                               timelineStart: offset + elapsed,
                                                duration: part))
-            elapsed += part
             if !loop { break }
+            elapsed += strideSeconds
         }
         return segments
     }
 
-    /// Video-clock -> source clock, returned only while this edit is audible.
+    /// The source and gains of all audible loop layers at output-time t.
+    /// In crossfade there are at most two sources, with linear equal-gain
+    /// transitions; this contract is shared by AVPlayers and AVAudioMix.
+    public func previewLayers(videoTime: Double, sourceDuration: Double,
+                              videoDuration: Double, offset: Double) -> [CineoMusicLayer] {
+        let local = videoTime - offset
+        let total = effectiveDuration(sourceDuration: sourceDuration,
+                                       videoDuration: videoDuration, offset: offset)
+        let cycle = sourceDuration - sourceIn
+        guard local >= 0, local < total, cycle > 0 else { return [] }
+        guard loop else {
+            return [.init(repeatIndex: 0, sourcePosition: sourceIn + local, gain: 1)]
+        }
+        let overlap = loopCrossfade
+        let strideSeconds = cycle - overlap
+        guard strideSeconds > 0 else { return [] }
+        let currentIndex = Int(floor(local / strideSeconds))
+        var layers: [CineoMusicLayer] = []
+        for i in max(0, currentIndex - 1)...currentIndex {
+            let relative = local - Double(i) * strideSeconds
+            guard relative >= 0, relative < cycle else { continue }
+            let entering = i > 0 && overlap > 0 ? min(1, relative / overlap) : 1
+            let leaving = overlap > 0 && Double(i + 1) * strideSeconds < total
+                ? min(1, (cycle - relative) / overlap) : 1
+            let gain = max(0, min(entering, leaving))
+            if gain > 0.00001 {
+                layers.append(.init(repeatIndex: i,
+                                    sourcePosition: sourceIn + relative, gain: gain))
+            }
+        }
+        return layers
+    }
+
+    /// Compatibility convenience for callers needing a single source clock.
     public func playbackPosition(videoTime: Double, sourceDuration: Double,
                                  videoDuration: Double, offset: Double) -> Double? {
-        let local = videoTime - offset
-        let length = effectiveDuration(sourceDuration: sourceDuration, videoDuration: videoDuration, offset: offset)
-        guard local >= 0, local < length, sourceDuration > sourceIn else { return nil }
-        let cycle = sourceDuration - sourceIn
-        return sourceIn + (loop ? local.truncatingRemainder(dividingBy: cycle) : local)
+        previewLayers(videoTime: videoTime, sourceDuration: sourceDuration,
+                      videoDuration: videoDuration, offset: offset)
+            .max(by: { $0.gain < $1.gain })?.sourcePosition
     }
+}
+
+public struct CineoMusicLayer: Equatable, Sendable {
+    public let repeatIndex: Int
+    public let sourcePosition: Double
+    public let gain: Double
 }
 
 public struct CineoMusicSegment: Equatable, Sendable {
