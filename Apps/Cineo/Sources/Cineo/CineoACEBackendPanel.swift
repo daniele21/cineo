@@ -10,7 +10,7 @@ struct CineoACEBackendPanel: View {
     private var statusIcon: String {
         switch backend.phase {
         case .ready: "checkmark.circle.fill"
-        case .launching, .checking: "arrow.triangle.2.circlepath"
+        case .launching, .checking, .stopping: "arrow.triangle.2.circlepath"
         case .missing, .failed: "exclamationmark.triangle.fill"
         case .stopped: "circle.dotted"
         }
@@ -34,6 +34,7 @@ struct CineoACEBackendPanel: View {
                 Text(backend.phase == .ready ? "Pronto" :
                      backend.phase == .launching ? "Avvio" :
                      backend.phase == .checking ? "Verifica" :
+                     backend.phase == .stopping ? "Arresto" :
                      backend.phase == .missing ? "Non configurato" :
                      backend.phase == .failed ? "Errore" : "Fermo")
                     .font(.caption.weight(.medium))

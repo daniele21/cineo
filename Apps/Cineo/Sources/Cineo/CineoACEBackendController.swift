@@ -8,7 +8,7 @@ import CineoMusic
 @MainActor
 final class CineoACEBackendController: ObservableObject {
     enum Phase: String {
-        case stopped, checking, missing, launching, ready, failed
+        case stopped, checking, missing, launching, ready, stopping, failed
     }
 
     @Published private(set) var phase: Phase = .stopped
@@ -43,7 +43,7 @@ final class CineoACEBackendController: ObservableObject {
     }
 
     var isReady: Bool { phase == .ready }
-    var isBusy: Bool { phase == .checking || phase == .launching }
+    var isBusy: Bool { phase == .checking || phase == .launching || phase == .stopping }
 
     var missingModels: [String] {
         installation?.unavailableModels() ?? CineoACEBackendInstallation.requiredModels
@@ -150,7 +150,8 @@ final class CineoACEBackendController: ObservableObject {
                     self.controlPipe = nil
                     self.server = nil
                     self.isManaged = false
-                    if self.phase == .stopped {
+                    if self.phase == .stopping {
+                        self.phase = .stopped
                         self.detail = "Motore ACE-Step arrestato."
                     } else {
                         self.phase = .failed
@@ -203,7 +204,7 @@ final class CineoACEBackendController: ObservableObject {
             detail = "Server non gestito da Cineo: non lo arresto."
             return
         }
-        phase = .stopped
+        phase = .stopping
         detail = "Arresto controllato del motore ACE-Step…"
         controlPipe?.fileHandleForWriting.closeFile()
         controlPipe = nil
@@ -227,7 +228,7 @@ final class CineoACEBackendController: ObservableObject {
         // An idle timeout might have closed the watchdog liveness pipe just
         // before a new job arrived. Wait for the *previous* supervisor's
         // termination handler to release ownership before starting a new one.
-        if phase == .stopped && server != nil {
+        if phase == .stopping && server != nil {
             for _ in 0..<100 {
                 if server == nil { break }
                 try Task.checkCancellation()
