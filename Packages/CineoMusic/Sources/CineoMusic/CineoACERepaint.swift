@@ -3,7 +3,7 @@ import Foundation
 /// Explicit source-relative inpaint of an existing WAV/MP3. In contrast to
 /// music.generate, this calls ACE-Step /synth directly with source audio and
 /// never invokes /lm. Originals are immutable.
-public struct CineoACERepaintRequest: Equatable, Sendable {
+public struct CineoACERepaintRequest: Codable, Equatable, Sendable {
     public let sourceStart: Double
     public let sourceEnd: Double
     public let sourceDuration: Double
