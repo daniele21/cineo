@@ -332,7 +332,19 @@ struct CineoMusicPanel: View {
                     HStack {
                         Button(String(format: "%.2f s", cue.time)) { editor.scrub(cue.time) }
                             .font(.caption.monospacedDigit())
-                        Text(cue.label).font(.caption).lineLimit(1)
+                        TextField("Nome cue", text: Binding(
+                            get: { editor.musicCues.first(where: { $0.id == cue.id })?.label ?? cue.label },
+                            set: { editor.renameMusicCue(cue.id, label: $0) }
+                        ))
+                        .textFieldStyle(.roundedBorder).font(.caption).frame(width: 112)
+                        TextField("s", value: Binding(
+                            get: { editor.musicCues.first(where: { $0.id == cue.id })?.time ?? cue.time },
+                            set: { editor.moveMusicCue(cue.id, to: $0) }
+                        ), format: .number.precision(.fractionLength(2)))
+                            .textFieldStyle(.roundedBorder).font(.caption)
+                            .frame(width: 65)
+                        Button("Qui") { editor.moveMusicCue(cue.id, to: editor.selectedTime) }
+                            .font(.caption)
                         Spacer()
                         Button("Allinea zoom") { editor.alignZoomToCue(cue.id) }
                             .font(.caption)
