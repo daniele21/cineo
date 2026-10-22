@@ -440,19 +440,20 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
         guard captureClickEvents else { return }
         pointerMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            let timestamp = event.timestamp
+            let isRight = event.type == .rightMouseDown
+            let pt = NSEvent.mouseLocation
             Task { @MainActor [weak self] in
                 guard let self, self.phase == .recording,
                       self.capturedClicks.count < 20_000,
                       let frame = self.selectedDisplayFrame else { return }
-                let pt = NSEvent.mouseLocation
                 let x = (pt.x - frame.minX) / frame.width
                 let y = (frame.maxY - pt.y) / frame.height
                 guard x.isFinite, y.isFinite, (0...1).contains(x),
                       (0...1).contains(y) else { return }
-                let kind: CineoPointerEvent.Kind = event.type == .rightMouseDown
-                    ? .rightClick : .leftClick
+                let kind: CineoPointerEvent.Kind = isRight ? .rightClick : .leftClick
                 self.capturedClicks.append(CineoPointerRawClick(
-                    hostSeconds: event.timestamp, x: x, y: y, kind: kind))
+                    hostSeconds: timestamp, x: x, y: y, kind: kind))
             }
         }
         if pointerMonitor == nil {
@@ -617,24 +618,33 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
                 return
             }
             if captureClickEvents {
-                if let stamp = firstFrameObserver?.firstFrameHostSeconds {
-                    let clock = try CineoCaptureClock(
-                        firstFrameHostSeconds: stamp, firstFramePTSSeconds: stamp)
-                    let events = capturedClicks.compactMap { click -> CineoPointerEvent? in
-                        guard let t = clock.relativeSeconds(
-                            hostSeconds: click.hostSeconds, recordedDuration: duration) else { return nil }
-                        return CineoPointerEvent(sourceSeconds: t, x: click.x, y: click.y, kind: click.kind)
-                    }.sorted { $0.sourceSeconds < $1.sourceSeconds }
-                    let sidecar = try CineoPointerSidecar(events: events)
-                    try CineoPointerRecordingStore().save(sidecar, for: url)
-                    log("Telemetria click salvata: \(events.count) eventi in JSON locale.")
-                } else {
-                    log("Primo frame non disponibile: nessuna telemetria salvata (video integro).", level: .warning)
+                do {
+                    if let stamp = firstFrameObserver?.firstFrameHostSeconds {
+                        let clock = try CineoCaptureClock(
+                            firstFrameHostSeconds: stamp, firstFramePTSSeconds: stamp)
+                        let events = capturedClicks.compactMap { click -> CineoPointerEvent? in
+                            guard let t = clock.relativeSeconds(
+                                hostSeconds: click.hostSeconds, recordedDuration: duration) else { return nil }
+                            return CineoPointerEvent(sourceSeconds: t, x: click.x, y: click.y, kind: click.kind)
+                        }.sorted { $0.sourceSeconds < $1.sourceSeconds }
+                        if events.isEmpty && !capturedClicks.isEmpty {
+                            log("Timestamp click non allineati al video: nessun sidecar scritto.", level: .warning)
+                        } else {
+                            let sidecar = try CineoPointerSidecar(events: events)
+                            try CineoPointerRecordingStore().save(sidecar, for: url)
+                            log("Telemetria click salvata: \(events.count) eventi in JSON locale.")
+                        }
+                    } else {
+                        log("Primo frame non disponibile: nessuna telemetria salvata (video integro).", level: .warning)
+                    }
+                } catch {
+                    log("Telemetria click non salvata: \(error.localizedDescription). MP4 preservato.", level: .warning)
                 }
             }
-            let audio = try await asset.loadTracks(withMediaType: .audio)
-            if (captureSystemAudio || captureMicrophone) && audio.isEmpty {
-                log("Video verificato, ma il file non contiene una traccia audio. Verifica permessi e impostazioni.", level: .warning)
+            if captureSystemAudio || captureMicrophone {
+                if let audio = try? await asset.loadTracks(withMediaType: .audio), audio.isEmpty {
+                    log("Video verificato, ma il file non contiene una traccia audio. Verifica permessi e impostazioni.", level: .warning)
+                }
             }
             recordedSeconds = duration
             recordedBytes = bytes
