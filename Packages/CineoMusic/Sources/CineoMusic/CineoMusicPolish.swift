@@ -78,9 +78,9 @@ public struct CineoMusicGainPoint: Equatable, Sendable {
     public let gain: Double
 }
 
-/// Conservative heuristic; 256 waveform buckets => coarse resolution.
-/// Labels must always refer to "audio activity", never verified narration.
-/// Tiny isolated clicks are ignored; close activity windows are merged.
+/// Local RMS activity heuristic (typically 20ms buckets), not speech detection.
+/// Ignore brief click bursts and merge short gaps. This does not identify
+/// speech: notification sounds can also trigger ducking.
 public enum CineoAudioActivityDetector {
     public static func ranges(peakBins: [Float], duration: Double,
                               threshold: Double, minimumActiveSeconds: Double = 0.25,
