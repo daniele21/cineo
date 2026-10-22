@@ -15,6 +15,8 @@ Cineo macOS tests — default build uses CLT + SwiftPM, no Xcode.app
   bash scripts/test-cineo.sh --native       Compile Cineo Capture Alpha using CLT.
   bash scripts/test-cineo.sh --interactive  Build/install/open ~/Applications/Cineo Dev.app.
   bash scripts/test-cineo.sh --signing      Set up/check persistent Mac Keychain identity.
+  bash scripts/test-cineo.sh --verify-persistent-signing
+                                           Verify existing pinned identity on temporary signed app copies.
   bash scripts/test-cineo.sh --isolated-capture
                                             Alias of --interactive; ONE canonical dev app.
   bash scripts/test-cineo.sh --exports --landscape "/path/video16x9.mp4"
@@ -212,6 +214,7 @@ case "$MODE" in
   --native) (( $# == 0 )) || fail "Unexpected arguments"; native ;;
   --interactive) (( $# == 0 )) || fail "Unexpected arguments"; interactive ;;
   --signing) (( $# == 0 )) || fail "Unexpected arguments"; require_mac; bash scripts/ensure-cineo-signing.sh ;;
+  --verify-persistent-signing) (( $# == 0 )) || fail "Unexpected arguments"; require_mac; bash scripts/verify-cineo-persistent-signing.sh ;;
   --isolated-capture) (( $# == 0 )) || fail "Unexpected arguments"; echo "Alias: --isolated-capture now uses the one canonical Cineo Dev identity."; interactive ;;
   --legacy-orbit-native) (( $# == 0 )) || fail "Unexpected arguments"; legacy_orbit_native ;;
   --legacy-orbit-interactive) (( $# == 0 )) || fail "Unexpected arguments"; legacy_orbit_interactive ;;
