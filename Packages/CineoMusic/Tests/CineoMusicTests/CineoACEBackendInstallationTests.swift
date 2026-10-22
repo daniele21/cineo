@@ -6,7 +6,7 @@ final class CineoACEBackendInstallationTests: XCTestCase {
     func testServerAlwaysUsesLoopbackWithExplicitModels() {
         let root = URL(fileURLWithPath: "/tmp/ace-install")
         let command = CineoACEBackendInstallation(root: root).launchArguments
-        XCTAssertEqual(command.prefix(4), ["--host", "127.0.0.1", "--port", "8080"])
+        XCTAssertEqual(Array(command.prefix(4)), ["--host", "127.0.0.1", "--port", "8080"])
         XCTAssertEqual(command.last, "/tmp/ace-install/models")
         XCTAssertFalse(command.contains("0.0.0.0"))
     }
