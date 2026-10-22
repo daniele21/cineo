@@ -18,7 +18,6 @@ private struct Result: Encodable {
     let passed: Bool
 }
 
-@main
 enum CineoCameraBenchmark {
     static func main() throws {
         guard let source = Bundle.module.url(forResource: "autoedit-cases", withExtension: "json") else {
@@ -50,3 +49,5 @@ enum CineoCameraBenchmark {
         if results.contains(where: { !$0.passed }) { exit(EXIT_FAILURE) }
     }
 }
+
+try CineoCameraBenchmark.main()
