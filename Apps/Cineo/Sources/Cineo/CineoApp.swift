@@ -464,8 +464,9 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
                 }
             }
         }
-        pointerMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+        if captureClickEvents {
+            pointerMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             let timestamp = event.timestamp
             let isRight = event.type == .rightMouseDown
             let pt = NSEvent.mouseLocation
@@ -482,9 +483,10 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
                     hostSeconds: timestamp, x: x, y: y, kind: kind))
             }
         }
-        if pointerMonitor == nil {
-            log("Monitoraggio click non disponibile. Eventuale percorso cursore campionato separatamente.",
-                level: .warning)
+            if pointerMonitor == nil {
+                log("Monitoraggio click non disponibile. Eventuale percorso cursore campionato separatamente.",
+                    level: .warning)
+            }
         }
     }
 
