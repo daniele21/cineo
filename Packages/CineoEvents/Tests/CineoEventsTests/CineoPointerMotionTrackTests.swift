@@ -28,7 +28,7 @@ struct CineoPointerMotionTrackTests {
         let reversed = [1.2, 1.15, 1.1, 1.05, 1.0].map {
             track.position(at: $0, interpolation: .easeInOut)
         }
-        #expect(ordered == reversed.reversed())
+        #expect(ordered == Array(reversed.reversed()))
         #expect(try #require(track.position(at: 1.1)).x > 0.49)
         #expect(try #require(track.position(at: 1.1)).x < 0.51)
     }
