@@ -1,5 +1,7 @@
 # Cineo — Development roadmap and implementation plan
 
+> **Execution plan (2026-11-04):** [Native cursor, cinematic motion and timeline — Recordly-inspired independent implementation](plans/recordly-native-polish-2026-11-04.md). Tracks C1/C2/C3 run in separate draft PRs against the plan branch; no change to main or public release claim.
+
 **Status:** active implementation; baseline is a stack of unmerged feature branches, not a released app.  
 **As of:** 2026-10-22.  
 **North star:** first-class macOS capture → intelligent local Auto Edit → user-controlled refinement → publishable export.
