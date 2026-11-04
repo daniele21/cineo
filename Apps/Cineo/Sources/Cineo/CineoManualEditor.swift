@@ -43,6 +43,7 @@ final class CineoEditorModel: ObservableObject {
     @Published var padding: Double = 0.06
     @Published var portrait = false
     @Published var style = "Dark"
+    @Published var motionPreset: CineoSceneMotionPreset = .classic
     @Published private(set) var showClickHighlights = false
     private var clickHighlightMarkers: [CineoClickHighlight] = []
     @Published var preview: NSImage?
@@ -786,7 +787,8 @@ final class CineoEditorModel: ObservableObject {
             paddingFraction: padding, background: color,
             camera: (autoEditPreviewEnabled && !autoEditCamera.isEmpty ? autoEditCamera : keyframes)
                 .sorted { $0.time < $1.time },
-            clickHighlights: showClickHighlights ? clickHighlightMarkers : nil
+            clickHighlights: showClickHighlights ? clickHighlightMarkers : nil,
+            motionPreset: motionPreset == .classic ? nil : motionPreset
         )
     }
 
@@ -1517,12 +1519,14 @@ final class CineoEditorModel: ObservableObject {
     }
 
     private func restorePlan() {
+        motionPreset = .classic
         guard let url = planURL, FileManager.default.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url),
               let plan = try? JSONDecoder().decode(CineoScenePlan.self, from: data),
               (try? plan.validate()) != nil
         else { return }
         keyframes = plan.camera
+        motionPreset = plan.motionPreset ?? .classic
         portrait = plan.outputHeight > plan.outputWidth
         padding = plan.paddingFraction
         let color = plan.background
@@ -2029,6 +2033,17 @@ struct CineoManualEditorView: View {
                     }
                     Text("Cineo Ocean e Frost riprendono la palette ufficiale del brand kit.")
                         .font(.caption2).foregroundStyle(.secondary)
+                    Picker("Movimento camera", selection: Binding(
+                        get: { editor.motionPreset },
+                        set: { editor.motionPreset = $0; editor.updateStyle() }
+                    )) {
+                        ForEach(CineoSceneMotionPreset.allCases, id: \.self) { preset in
+                            Text(preset == .classic ? "Classico" :
+                                 preset == .focused ? "Dinamico" : "Cinematico").tag(preset)
+                        }
+                    }
+                    .disabled(editor.sourceURL == nil || editor.isExporting)
+                    .help("Profilo della camera: l'anteprima e l'export condividono la stessa curva.")
                     Toggle("Evidenzia click", isOn: Binding(
                         get: { editor.showClickHighlights },
                         set: { editor.setClickHighlights($0) }
