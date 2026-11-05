@@ -664,6 +664,9 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
                 fail("MP4 was written but no playable video track was found.")
                 return
             }
+            // The raw recording is retained even when the independent cursor
+            // metadata cannot be finalized. Surface that failure prominently.
+            var independentCursorReady = !captureIndependentCursor
             if captureClickEvents || capturePointerMovement || captureIndependentCursor {
                 do {
                     if let stamp = firstFrameObserver?.firstFrameHostSeconds {
@@ -681,6 +684,7 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
                                 events: events,
                                 cursorMode: captureIndependentCursor ? .independentOverlay : .embedded)
                             try CineoPointerRecordingStore().save(sidecar, for: url)
+                            independentCursorReady = true
                             log("Telemetria puntatore salvata: \(events.count) eventi (click/movimento) in JSON locale.")
                         }
                     } else {
@@ -705,7 +709,12 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
             capturedClicks = []
             finalizationStarted = nil
             phase = .complete
-            status = "MP4 verified and ready. Choose Open MP4 or Show recordings."
+            status = independentCursorReady
+                ? "MP4 verificato e pronto. Apri il video o l'editor."
+                : "MP4 salvato, ma cursore ricostruito NON disponibile: metadati mancanti. Ripeti la cattura in modalità cursore standard."
+            if !independentCursorReady {
+                log("ATTENZIONE: MP4 senza cursore incorporato, sidecar v2 non valido o assente. Non esportare come video finale.", level: .error)
+            }
             log("Verified MP4: video track present, \(Int(duration)) seconds, \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)).")
             monitorTask?.cancel()
             monitorTask = nil
