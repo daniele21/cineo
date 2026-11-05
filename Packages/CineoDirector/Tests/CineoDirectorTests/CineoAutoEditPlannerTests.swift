@@ -29,6 +29,24 @@ struct CineoAutoEditPlannerTests {
         #expect(p.keyframes[1].zoom > 1)
     }
 
+    @Test func globalSuggestionsCoverBeginningMiddleAndEndOfVideo() throws {
+        // UI playhead/scene selection must never narrow the global proposal input.
+        // Three distant click clusters must generate separate suggestions.
+        let duration = 65.0
+        let source = try CineoPointerSidecar(events: [
+            .init(sourceSeconds: 3, x: 0.2, y: 0.25, kind: .leftClick),
+            .init(sourceSeconds: 27, x: 0.5, y: 0.55, kind: .leftClick),
+            .init(sourceSeconds: 55, x: 0.8, y: 0.75, kind: .leftClick)
+        ])
+        let proposal = CineoAutoEditPlanner().propose(
+            sidecar: source, duration: duration)
+        #expect(proposal.shots.count == 3)
+        #expect(proposal.shots[0].start < 10)
+        #expect(proposal.shots[1].start > 20 && proposal.shots[1].start < 35)
+        #expect(proposal.shots[2].start > 45)
+        #expect(proposal.keyframes.allSatisfy { $0.time >= 0 && $0.time <= duration })
+    }
+
     @Test func shotOrderIsDeterministic() throws {
         let s = try CineoPointerSidecar(events: [
             .init(sourceSeconds: 3, x: 0.5, y: 0.5, kind: .leftClick),
