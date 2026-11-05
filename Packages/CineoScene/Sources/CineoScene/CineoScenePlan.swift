@@ -8,6 +8,8 @@ public struct CineoScenePlan: Codable, Sendable, Equatable {
     public var paddingFraction: Double
     public var background: CineoRGB
     public var camera: [CineoCameraKeyframe]
+    /// Nil in old projects: exact legacy camera interpolation.
+    public var motionPreset: CineoSceneMotionPreset?
     /// Optional click pulses, nil for all pre-effect Cineo projects.
     /// Explicitly not a duplicated mouse pointer. Renderer shares preview/export.
     public var clickHighlights: [CineoClickHighlight]?
@@ -16,13 +18,15 @@ public struct CineoScenePlan: Codable, Sendable, Equatable {
                 paddingFraction: Double = 0.065,
                 background: CineoRGB = .init(red: 0.08, green: 0.10, blue: 0.16),
                 camera: [CineoCameraKeyframe] = [],
-                clickHighlights: [CineoClickHighlight]? = nil) {
+                clickHighlights: [CineoClickHighlight]? = nil,
+                motionPreset: CineoSceneMotionPreset? = nil) {
         self.outputWidth = outputWidth
         self.outputHeight = outputHeight
         self.paddingFraction = paddingFraction
         self.background = background
         self.camera = camera
         self.clickHighlights = clickHighlights
+        self.motionPreset = motionPreset
     }
 
     public func validate() throws {
@@ -85,7 +89,7 @@ public struct CineoScenePlan: Codable, Sendable, Equatable {
                 let range = after.time - before.time
                 if range <= 0 { return after }
                 let p = min(1, max(0, (seconds - before.time) / range))
-                let eased = p * p * (3 - 2 * p)
+                let eased = CineoSceneMotionCurve.progress(p, preset: motionPreset ?? .classic)
                 return CineoCameraKeyframe(
                     time: seconds,
                     zoom: exp(log(before.zoom) + (log(after.zoom) - log(before.zoom)) * eased),

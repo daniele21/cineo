@@ -71,23 +71,58 @@ public enum CineoEventsError: Error, Equatable, Sendable {
     case invalidPackage
 }
 
+/// Source pointer provenance. Old recordings always have embedded pointers;
+/// independently drawn pointers are allowed ONLY for capture with hidden cursor.
+public enum CineoRecordedCursorMode: String, Codable, Equatable, Sendable {
+    case embedded
+    case independentOverlay
+}
+
 public struct CineoPointerSidecar: Codable, Sendable, Equatable {
     public static let version = 1
+    public static let overlayVersion = 2
     public let schemaVersion: Int
     public let events: [CineoPointerEvent]
+    public let cursorMode: CineoRecordedCursorMode
 
-    public init(events: [CineoPointerEvent]) throws {
-        guard events.count <= 10_000_000,
-              events.allSatisfy(\.isValid),
-              zip(events, events.dropFirst()).allSatisfy({ pair in pair.0.sourceSeconds <= pair.1.sourceSeconds })
-        else { throw CineoEventsError.invalidEvent }
-        self.schemaVersion = Self.version
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, events, cursorMode
+    }
+
+    public init(events: [CineoPointerEvent],
+                cursorMode: CineoRecordedCursorMode = .embedded) throws {
+        self.schemaVersion = cursorMode == .embedded ? Self.version : Self.overlayVersion
         self.events = events
+        self.cursorMode = cursorMode
+        try validate()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let object = try decoder.container(keyedBy: CodingKeys.self)
+        self.schemaVersion = try object.decode(Int.self, forKey: .schemaVersion)
+        self.events = try object.decode([CineoPointerEvent].self, forKey: .events)
+        // Schema 1 did not store cursorMode; never assume it is overlay-safe.
+        self.cursorMode = try object.decodeIfPresent(CineoRecordedCursorMode.self,
+                                                    forKey: .cursorMode) ?? .embedded
+        try validate()
     }
 
     public func validate() throws {
-        guard schemaVersion == Self.version else { throw CineoEventsError.unsupportedSchema }
-        _ = try CineoPointerSidecar(events: events)
+        guard schemaVersion == Self.version || schemaVersion == Self.overlayVersion else {
+            throw CineoEventsError.unsupportedSchema
+        }
+        guard schemaVersion != Self.version || cursorMode == .embedded else {
+            throw CineoEventsError.unsupportedSchema
+        }
+        guard events.count <= 10_000_000,
+              events.allSatisfy(\.isValid),
+              zip(events, events.dropFirst()).allSatisfy({
+                  $0.0.sourceSeconds <= $0.1.sourceSeconds
+              }) else { throw CineoEventsError.invalidEvent }
+        guard cursorMode != .independentOverlay ||
+              events.contains(where: { $0.kind == .moved }) else {
+            throw CineoEventsError.invalidEvent
+        }
     }
 }
 
