@@ -17,6 +17,15 @@ struct CineoImportedCursorBenchmark {
         defer { try? FileManager.default.removeItem(at: root) }
         let video = root.appendingPathComponent("synthetic-screen.mp4")
         try await generateVideo(video)
+        if ProcessInfo.processInfo.environment["CINEO_CURSOR_SAVE_SYNTHETIC"] == "1" {
+            let artifact = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent("cursor-synthetic-debug.mp4")
+            if FileManager.default.fileExists(atPath: artifact.path) {
+                try FileManager.default.removeItem(at: artifact)
+            }
+            try FileManager.default.copyItem(at: video, to: artifact)
+            print("CURSOR_SYNTHETIC_TEST_MEDIA bytes=\((try Data(contentsOf: video)).count)")
+        }
         let digestBefore = SHA256.hash(data: try Data(contentsOf: video))
         let asset = AVURLAsset(url: video)
         let duration = try await asset.load(.duration)
