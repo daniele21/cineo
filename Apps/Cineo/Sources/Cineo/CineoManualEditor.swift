@@ -2218,10 +2218,13 @@ struct CineoManualEditorView: View {
                                             .interpolation(.high)
                                             .frame(width: w, height: h)
                                             .onTapGesture { location in
-                                                editor.choosePoint(
-                                                    x: Double(location.x / w),
-                                                    y: Double(location.y / h)
-                                                )
+                                                let x = Double(location.x / w)
+                                                let y = Double(location.y / h)
+                                                if editor.isChoosingImportedCursor {
+                                                    editor.trackImportedCursor(atCanvasX: x, y: y)
+                                                } else {
+                                                    editor.choosePoint(x: x, y: y)
+                                                }
                                             }
                                     } else {
                                         ZStack {
@@ -2396,14 +2399,45 @@ struct CineoManualEditorView: View {
                         { editor.padding = $0; editor.updateStyle() }
                     ), in: 0...0.25)
                     Divider()
+                    Text("Analisi video importato").font(.headline)
+                    Button(editor.isChoosingImportedCursor
+                           ? "Seleziona il cursore nell'anteprima…"
+                           : "Analizza cursore nel video") {
+                        editor.requestImportedCursorSelection()
+                    }
+                    .disabled(editor.sourceURL == nil || editor.isExporting ||
+                              editor.isAnalyzingImportedVideo)
+                    if editor.isChoosingImportedCursor {
+                        Text("Metti in pausa il video su un frame nitido e clicca sulla punta del cursore nell'anteprima.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if editor.isAnalyzingImportedVideo {
+                        ProgressView(value: editor.importedAnalysisProgress)
+                        HStack {
+                            Text("\(Int(editor.importedAnalysisProgress * 100))% · analisi locale")
+                            Spacer()
+                            Button("Annulla") { editor.cancelImportedVideoAnalysis() }
+                        }
+                        .font(.caption2)
+                    }
+                    if let report = editor.importedAnalysis {
+                        Text("Tracciamento: \(report.samples.count) posizioni stimate. Nessun click dedotto; il cursore originale del video resta visibile.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Divider()
                     Text("Smart Camera · Auto Edit").font(.headline)
                     Picker("Intensità", selection: $editor.autoEditPreset) {
                         ForEach(CameraPreset.allCases, id: \.self) { preset in
                             Text(preset.displayName).tag(preset)
                         }
                     }
-                    Button("Genera proposte dai click") { editor.proposeAutoEdit() }
-                        .disabled(!editor.hasPointerEvents || editor.isExporting)
+                    Button(editor.hasPointerEvents
+                           ? "Genera proposte dai click"
+                           : "Genera zoom da soste del cursore") {
+                        editor.proposeAutoEdit()
+                    }
+                    .disabled((!editor.hasPointerEvents && !editor.hasImportedVideoMotion) ||
+                              editor.isExporting || editor.isAnalyzingImportedVideo)
                     if editor.autoEditPreviewEnabled {
                         Text("\(editor.autoEditSelectedCount) su \(editor.autoEditShotCount) proposte attive. Nessuna modifica salvata.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -2439,8 +2473,8 @@ struct CineoManualEditorView: View {
                                 .disabled(editor.autoEditSelectedCount == 0)
                             Button("Annulla") { editor.discardAutoEditProposal() }
                         }
-                    } else if !editor.hasPointerEvents {
-                        Text("Nessuna telemetria click: registra un nuovo video abilitando l'opzione nella dashboard.")
+                    } else if !editor.hasPointerEvents && !editor.hasImportedVideoMotion {
+                        Text("Nessun click o movimento disponibile. Per video importati usa «Analizza cursore nel video»; per video Cineo abilita la telemetria.")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     if editor.mode == .assisted {
