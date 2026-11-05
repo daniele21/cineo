@@ -12,6 +12,7 @@ import CineoMusic
 import CineoAudio
 import CineoEvents
 import CineoDirector
+import CineoVideoAnalysis
 import CryptoKit
 
 @MainActor
@@ -158,6 +159,15 @@ final class CineoEditorModel: ObservableObject {
     @Published var autoEditPreset: CameraPreset = .balanced
     @Published private(set) var hasPointerEvents = false
     @Published private(set) var hasPointerMovement = false
+    @Published private(set) var importedAnalysis: CineoImportedPointerAnalysis?
+    @Published private(set) var isAnalyzingImportedVideo = false
+    @Published private(set) var importedAnalysisProgress: Double = 0
+    @Published var isChoosingImportedCursor = false
+    private var importedVideoAnalysisTask: Task<Void, Never>?
+    private var importedAnalysisRequest = UUID()
+    var hasImportedVideoMotion: Bool {
+        (importedAnalysis?.movementEvents().count ?? 0) >= 3
+    }
     private var cursorFollowUndo: (before: [CineoCameraKeyframe], after: [CineoCameraKeyframe])?
     var canUndoCursorFollow: Bool { cursorFollowUndo?.after == keyframes }
     @Published private(set) var autoEditShotCount = 0
@@ -912,15 +922,112 @@ final class CineoEditorModel: ObservableObject {
         refreshPreview()
     }
 
-    func applyCursorFollow() {
-        guard sourceURL != nil, !isExporting, !autoEditPreviewEnabled,
-              let pointerSidecar, hasPointerMovement else {
-            status = "Segui cursore richiede telemetria di movimento e nessuna proposta Auto Edit aperta."
+    /// Explicit user seed, never inferred from a click in video pixels.
+    func requestImportedCursorSelection() {
+        guard sourceURL != nil, !isExporting, !isAnalyzingImportedVideo else { return }
+        isChoosingImportedCursor = true
+        pausePreviewPlayback()
+        status = "Seleziona la punta del cursore nel fotogramma. Cineo analizzerà il video localmente a partire da qui."
+    }
+
+    func cancelImportedVideoAnalysis() {
+        importedVideoAnalysisTask?.cancel()
+        importedVideoAnalysisTask = nil
+        importedAnalysisRequest = UUID()
+        isChoosingImportedCursor = false
+        isAnalyzingImportedVideo = false
+        importedAnalysisProgress = 0
+    }
+
+    func trackImportedCursor(atCanvasX x: Double, y: Double) {
+        guard isChoosingImportedCursor, let source = sourceURL,
+              !isExporting, !isSavingProject, !isAnalyzingImportedVideo,
+              let scene = try? currentPlan.evaluate(
+                  time: selectedTime, sourceWidth: sourcePixelWidth,
+                  sourceHeight: sourcePixelHeight),
+              x.isFinite, y.isFinite, (0...1).contains(x), (0...1).contains(y)
+        else { return }
+        let cx = x * Double(outputWidth), cy = y * Double(outputHeight)
+        guard cx >= scene.outputX, cx <= scene.outputX + scene.outputWidth,
+              cy >= scene.outputY, cy <= scene.outputY + scene.outputHeight
+        else {
+            status = "Seleziona il cursore dentro l'area del video, non nello sfondo."
             return
         }
-        // A cut changes the output clock. Never interpolate across a deleted
-        // region: removed events have no output timestamp and are dropped.
-        let movements = pointerSidecar.events.compactMap { event -> CineoPointerEvent? in
+        let sx = scene.cropX + (cx - scene.outputX) / scene.outputWidth * scene.cropWidth
+        let sy = scene.cropY + (cy - scene.outputY) / scene.outputHeight * scene.cropHeight
+        let atSource = cutList?.sourceTime(at: selectedTime) ?? selectedTime
+        guard atSource < sourceDuration - 0.2 else {
+            status = "Per tracciare il cursore scegli un fotogramma precedente alla fine."
+            return
+        }
+        importedVideoAnalysisTask?.cancel()
+        importedAnalysisRequest = UUID()
+        let requestID = importedAnalysisRequest
+        importedAnalysisProgress = 0
+        isAnalyzingImportedVideo = true
+        isChoosingImportedCursor = false
+        status = "Analisi cursore locale in corso. Puoi annullarla; il video non viene modificato."
+        let tracker = CineoVideoCursorTracker()
+        let videoLength = sourceDuration
+        importedVideoAnalysisTask = Task { [weak self] in
+            do {
+                let report = try await tracker.analyze(
+                    videoURL: source, expectedSourceDuration: videoLength,
+                    seedSourceSeconds: atSource, hotspotX: sx, hotspotY: sy,
+                    progress: { [weak self] fraction in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.importedAnalysisRequest == requestID,
+                                  self.sourceURL == source else { return }
+                            self.importedAnalysisProgress = fraction
+                        }
+                    })
+                guard let self, !Task.isCancelled,
+                      self.importedAnalysisRequest == requestID,
+                      self.sourceURL == source else { return }
+                self.importedAnalysis = report
+                self.hasPointerMovement = (self.pointerSidecar?.events.contains {
+                    $0.kind == .moved
+                } ?? false) || self.hasImportedVideoMotion
+                do {
+                    if let project = self.projectURL {
+                        try CineoImportedAnalysisStore().save(report, projectURL: project)
+                    } else {
+                        try CineoImportedAnalysisStore().save(report, forVideo: source)
+                    }
+                    self.status = "Tracking locale: \(report.samples.count) posizioni salvate. Ora puoi generare zoom da soste del cursore o applicare Camera Follow."
+                } catch {
+                    self.status = "Tracking riuscito (\(report.samples.count) posizioni), ma cache non salvata: \(error.localizedDescription)."
+                }
+            } catch is CancellationError {
+                guard let self, self.importedAnalysisRequest == requestID else { return }
+                self.status = "Analisi cursore annullata. Il video originale è invariato."
+            } catch {
+                guard let self, self.importedAnalysisRequest == requestID else { return }
+                self.status = "Tracking non riuscito: \(error.localizedDescription). Prova un frame nitido e indica la punta del cursore."
+            }
+            guard let self, self.importedAnalysisRequest == requestID else { return }
+            self.isAnalyzingImportedVideo = false
+            self.importedVideoAnalysisTask = nil
+        }
+    }
+
+    func applyCursorFollow() {
+        guard sourceURL != nil, !isExporting, !autoEditPreviewEnabled,
+              hasPointerMovement else {
+            status = "Segui cursore richiede movimenti attendibili e nessuna proposta Auto Edit aperta."
+            return
+        }
+        // Native telemetry has priority; inferred video coordinates are only
+        // used when no recorded mouse movements exist.
+        let sourceMovements: [CineoPointerEvent]
+        if let events = pointerSidecar?.events.filter({ $0.kind == .moved }), !events.isEmpty {
+            sourceMovements = events
+        } else {
+            sourceMovements = importedAnalysis?.movementEvents() ?? []
+        }
+        // A cut changes the output clock. Never interpolate across a deleted region.
+        let movements = sourceMovements.compactMap { event -> CineoPointerEvent? in
             guard event.kind == .moved else { return nil }
             let time = cutList?.outputTime(forSourceSeconds: event.sourceSeconds) ??
                        (cutList == nil ? event.sourceSeconds : nil)
@@ -969,36 +1076,52 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func proposeAutoEdit() {
-        guard sourceURL != nil, let pointerSidecar else {
-            status = "Nessun click registrato. Per Auto Edit, abilita «Registra click» prima della cattura."
+        guard sourceURL != nil, !isExporting else { return }
+        let draft: CineoAutoEditProposal
+        let origin: String
+        if hasPointerEvents, let pointerSidecar {
+            let editSidecar: CineoPointerSidecar
+            if let cutList {
+                let mapped = pointerSidecar.events.compactMap { event -> CineoPointerEvent? in
+                    guard let time = cutList.outputTime(forSourceSeconds: event.sourceSeconds)
+                    else { return nil }
+                    return CineoPointerEvent(sourceSeconds: time, x: event.x,
+                                             y: event.y, kind: event.kind)
+                }
+                guard let sidecar = try? CineoPointerSidecar(events: mapped) else {
+                    status = "Telemetria click non valida dopo i tagli."
+                    return
+                }
+                editSidecar = sidecar
+            } else {
+                editSidecar = pointerSidecar
+            }
+            draft = CineoAutoEditPlanner().propose(
+                sidecar: editSidecar, duration: duration, preset: autoEditPreset)
+            origin = "click registrati"
+        } else if let analysis = importedAnalysis {
+            let cuts = cutList
+            let mapper: @Sendable (Double) -> Double? = { seconds in
+                if let cuts { return cuts.outputTime(forSourceSeconds: seconds) }
+                return seconds
+            }
+            draft = CineoImportedVideoAttentionPlanner().propose(
+                analysis: analysis, outputDuration: duration,
+                cutMapper: mapper, preset: autoEditPreset)
+            origin = "soste stimate del cursore (nessun click dedotto)"
+        } else {
+            status = "Per un MP4 esterno seleziona «Analizza cursore nel video». Per una registrazione Cineo abilita i click."
             return
         }
-        let editSidecar: CineoPointerSidecar
-        if let cutList {
-            let mapped = pointerSidecar.events.compactMap { event -> CineoPointerEvent? in
-                guard let time = cutList.outputTime(forSourceSeconds: event.sourceSeconds) else { return nil }
-                return CineoPointerEvent(sourceSeconds: time, x: event.x,
-                                         y: event.y, kind: event.kind)
-            }
-            guard let sidecar = try? CineoPointerSidecar(events: mapped) else {
-                status = "Telemetria click non valida dopo i tagli."
-                return
-            }
-            editSidecar = sidecar
-        } else {
-            editSidecar = pointerSidecar
-        }
-        let draft = CineoAutoEditPlanner().propose(
-            sidecar: editSidecar, duration: duration, preset: autoEditPreset)
         autoEditShots = draft.shots
         autoEditSelectedIndices = Set(draft.shots.indices)
         autoEditShotCount = draft.shots.count
         autoEditCamera = draft.keyframes
         autoEditPreviewEnabled = !draft.isEmpty
         if draft.isEmpty {
-            status = "Nessuno zoom utile rilevato: il video rimane invariato."
+            status = "Nessuno zoom attendibile rilevato da \(origin): il video resta invariato."
         } else {
-            status = "Anteprima non salvata: \(draft.shots.count) proposte di Smart Camera. Premi «Applica zoom» per confermare."
+            status = "Anteprima da \(origin): \(draft.shots.count) zoom modificabili. Conferma con «Applica zoom»."
         }
         refreshPreview()
     }
@@ -1069,6 +1192,7 @@ final class CineoEditorModel: ObservableObject {
     private func loadPointerEvents(for original: URL, source: URL, project: URL?) {
         pointerSidecar = nil
         cursorOverlay = nil
+        importedAnalysis = nil
         if let project {
             pointerSidecar = try? CineoPointerSidecarStore().load(projectURL: project)
         } else {
@@ -1077,7 +1201,15 @@ final class CineoEditorModel: ObservableObject {
         hasPointerEvents = pointerSidecar?.events.contains(where: {
             $0.kind == .leftClick || $0.kind == .rightClick
         }) ?? false
-        hasPointerMovement = pointerSidecar?.events.contains(where: { $0.kind == .moved }) ?? false
+        let cache = CineoImportedAnalysisStore()
+        let cached = project == nil
+            ? try? cache.load(forVideo: source)
+            : try? cache.load(projectURL: project!)
+        if let cached, abs(cached.sourceDuration - sourceDuration) < 0.2 {
+            importedAnalysis = cached
+        }
+        hasPointerMovement = (pointerSidecar?.events.contains(where: { $0.kind == .moved }) ?? false)
+            || hasImportedVideoMotion
         cursorFollowUndo = nil
         if let sidecar = pointerSidecar {
             if sidecar.cursorMode == .independentOverlay {
@@ -1102,6 +1234,8 @@ final class CineoEditorModel: ObservableObject {
 
     func open(_ url: URL) async {
         guard !isExporting && !isSavingProject else { return }
+        cancelImportedVideoAnalysis()
+        importedAnalysis = nil
         status = "Caricamento del video o progetto…"
         pausePreviewPlayback()
         // Music jobs are owned by the application queue; no cancellation on navigation.
@@ -1278,13 +1412,22 @@ final class CineoEditorModel: ObservableObject {
                         status = "Progetto salvato senza telemetria click: \(error.localizedDescription)"
                     }
                 }
+                var importedCacheWarning = ""
+                if let importedAnalysis {
+                    do {
+                        try CineoImportedAnalysisStore().save(importedAnalysis,
+                                                              projectURL: location)
+                    } catch {
+                        importedCacheWarning = " · Analisi cursore non archiviata: \(error.localizedDescription)"
+                    }
+                }
                 musicQueue.relinkVideo(from: source, to: savedSource)
                 projectURL = location
                 sourceURL = savedSource
                 if musicAsset != nil { prepareMusicPlayer() }
                 if savePlan() {
                     saveMusicSettings()
-                    status = "Progetto Cineo salvato: \(location.lastPathComponent)"
+                    status = "Progetto Cineo salvato: \(location.lastPathComponent)" + importedCacheWarning
                 }
             } catch {
                 status = "Salvataggio progetto fallito: \(error.localizedDescription). Il video originale è intatto."
@@ -1389,6 +1532,9 @@ final class CineoEditorModel: ObservableObject {
             status = "Termina o annulla l'esportazione prima di chiudere l'editor."
             return
         }
+        cancelImportedVideoAnalysis()
+        importedAnalysis = nil
+        hasPointerMovement = false
         pausePreviewPlayback()
         // Music jobs are owned by the application queue; no cancellation on navigation.
         musicPlayer = nil
@@ -2072,10 +2218,13 @@ struct CineoManualEditorView: View {
                                             .interpolation(.high)
                                             .frame(width: w, height: h)
                                             .onTapGesture { location in
-                                                editor.choosePoint(
-                                                    x: Double(location.x / w),
-                                                    y: Double(location.y / h)
-                                                )
+                                                let x = Double(location.x / w)
+                                                let y = Double(location.y / h)
+                                                if editor.isChoosingImportedCursor {
+                                                    editor.trackImportedCursor(atCanvasX: x, y: y)
+                                                } else {
+                                                    editor.choosePoint(x: x, y: y)
+                                                }
                                             }
                                     } else {
                                         ZStack {
@@ -2250,14 +2399,45 @@ struct CineoManualEditorView: View {
                         { editor.padding = $0; editor.updateStyle() }
                     ), in: 0...0.25)
                     Divider()
+                    Text("Analisi video importato").font(.headline)
+                    Button(editor.isChoosingImportedCursor
+                           ? "Seleziona il cursore nell'anteprima…"
+                           : "Analizza cursore nel video") {
+                        editor.requestImportedCursorSelection()
+                    }
+                    .disabled(editor.sourceURL == nil || editor.isExporting ||
+                              editor.isAnalyzingImportedVideo)
+                    if editor.isChoosingImportedCursor {
+                        Text("Metti in pausa il video su un frame nitido e clicca sulla punta del cursore nell'anteprima.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if editor.isAnalyzingImportedVideo {
+                        ProgressView(value: editor.importedAnalysisProgress)
+                        HStack {
+                            Text("\(Int(editor.importedAnalysisProgress * 100))% · analisi locale")
+                            Spacer()
+                            Button("Annulla") { editor.cancelImportedVideoAnalysis() }
+                        }
+                        .font(.caption2)
+                    }
+                    if let report = editor.importedAnalysis {
+                        Text("Tracciamento: \(report.samples.count) posizioni stimate. Nessun click dedotto; il cursore originale del video resta visibile.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Divider()
                     Text("Smart Camera · Auto Edit").font(.headline)
                     Picker("Intensità", selection: $editor.autoEditPreset) {
                         ForEach(CameraPreset.allCases, id: \.self) { preset in
                             Text(preset.displayName).tag(preset)
                         }
                     }
-                    Button("Genera proposte dai click") { editor.proposeAutoEdit() }
-                        .disabled(!editor.hasPointerEvents || editor.isExporting)
+                    Button(editor.hasPointerEvents
+                           ? "Genera proposte dai click"
+                           : "Genera zoom da soste del cursore") {
+                        editor.proposeAutoEdit()
+                    }
+                    .disabled((!editor.hasPointerEvents && !editor.hasImportedVideoMotion) ||
+                              editor.isExporting || editor.isAnalyzingImportedVideo)
                     if editor.autoEditPreviewEnabled {
                         Text("\(editor.autoEditSelectedCount) su \(editor.autoEditShotCount) proposte attive. Nessuna modifica salvata.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -2293,8 +2473,8 @@ struct CineoManualEditorView: View {
                                 .disabled(editor.autoEditSelectedCount == 0)
                             Button("Annulla") { editor.discardAutoEditProposal() }
                         }
-                    } else if !editor.hasPointerEvents {
-                        Text("Nessuna telemetria click: registra un nuovo video abilitando l'opzione nella dashboard.")
+                    } else if !editor.hasPointerEvents && !editor.hasImportedVideoMotion {
+                        Text("Nessun click o movimento disponibile. Per video importati usa «Analizza cursore nel video»; per video Cineo abilita la telemetria.")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     if editor.mode == .assisted {
