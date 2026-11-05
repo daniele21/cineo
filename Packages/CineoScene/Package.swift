@@ -15,7 +15,8 @@ let package = Package(
             .product(name: "CineoProject", package: "CineoProject"),
             .product(name: "CineoEvents", package: "CineoEvents")]),
         .executableTarget(name: "CineoSceneSpike", dependencies: ["CineoScene", .product(name: "CineoProject", package: "CineoProject")]),
-        .executableTarget(name: "CineoSceneSmoke", dependencies: ["CineoScene"]),
+        .executableTarget(name: "CineoSceneSmoke", dependencies: ["CineoScene",
+            .product(name: "CineoEvents", package: "CineoEvents")]),
         .testTarget(name: "CineoSceneTests", dependencies: ["CineoScene",
             .product(name: "CineoEvents", package: "CineoEvents")])
     ]
