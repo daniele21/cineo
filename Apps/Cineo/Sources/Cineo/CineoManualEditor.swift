@@ -2141,7 +2141,13 @@ private final class CineoStudioLayoutState: ObservableObject {
         case appearance = "Stile"
     }
 
+    enum SmartCameraScope: String, CaseIterable {
+        case entireVideo = "Intero video"
+        case selectedPoint = "Punto selezionato"
+    }
+
     @Published var inspectorSection: InspectorSection = .smart
+    @Published var smartCameraScope: SmartCameraScope = .entireVideo
     @Published var cutsExpanded = false
     @Published var detailsExpanded = false
 }
@@ -2581,20 +2587,41 @@ struct CineoManualEditorView: View {
                     .foregroundStyle(.secondary)
             }
             Divider()
-            Picker("Intensità", selection: $editor.autoEditPreset) {
-                ForEach(CameraPreset.allCases, id: \.self) { preset in
-                    Text(preset.displayName).tag(preset)
+            Picker("Ambito dei suggerimenti", selection: $layout.smartCameraScope) {
+                ForEach(CineoStudioLayoutState.SmartCameraScope.allCases, id: \.self) { scope in
+                    Text(scope.rawValue).tag(scope)
                 }
             }
-            Button(editor.hasPointerEvents
-                   ? "Genera proposte dai click"
-                   : "Genera zoom dalle soste") {
-                editor.proposeAutoEdit()
+            .pickerStyle(.radioGroup)
+            .accessibilityLabel("Ambito dei suggerimenti Smart Camera")
+            Text(layout.smartCameraScope == .entireVideo
+                 ? "Analizza tutto il video, indipendentemente dal punto selezionato."
+                 : "Crea un solo zoom attorno al punto corrente della timeline.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if layout.smartCameraScope == .entireVideo {
+                Picker("Intensità", selection: $editor.autoEditPreset) {
+                    ForEach(CameraPreset.allCases, id: \.self) { preset in
+                        Text(preset.displayName).tag(preset)
+                    }
+                }
+                Button("Genera zoom per tutto il video") {
+                    editor.proposeAutoEdit()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled((!editor.hasPointerEvents && !editor.hasImportedVideoMotion) ||
+                          editor.isExporting || editor.isAnalyzingImportedVideo)
+                .help("Usa i click registrati o le soste del cursore lungo tutta la timeline")
+            } else {
+                Button("Suggerisci zoom in questo punto") {
+                    editor.applySuggestedZoom()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(editor.sourceURL == nil || editor.isExporting ||
+                          editor.isAnalyzingImportedVideo)
+                .help("Crea uno zoom solo attorno al playhead corrente")
             }
-            .buttonStyle(.borderedProminent)
-            .disabled((!editor.hasPointerEvents && !editor.hasImportedVideoMotion) ||
-                      editor.isExporting || editor.isAnalyzingImportedVideo)
-            if editor.autoEditPreviewEnabled {
+            if layout.smartCameraScope == .entireVideo && editor.autoEditPreviewEnabled {
                 Text("\(editor.autoEditSelectedCount) di \(editor.autoEditShotCount) zoom selezionati · non ancora applicati")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -2630,16 +2657,11 @@ struct CineoManualEditorView: View {
                         .disabled(editor.autoEditSelectedCount == 0)
                     Button("Scarta") { editor.discardAutoEditProposal() }
                 }
-            } else if !editor.hasPointerEvents && !editor.hasImportedVideoMotion {
+            } else if layout.smartCameraScope == .entireVideo &&
+                        !editor.hasPointerEvents && !editor.hasImportedVideoMotion {
                 Text("Per un MP4 importato, analizza prima il cursore. Per le registrazioni Cineo puoi usare gli eventi acquisiti.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-            if editor.mode == .assisted {
-                Divider()
-                Button("Suggerisci zoom in questo punto") { editor.applySuggestedZoom() }
-                    .disabled(editor.sourceURL == nil || editor.isExporting)
-                    .help("Usa il punto selezionato nell'anteprima")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
