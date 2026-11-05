@@ -63,7 +63,7 @@ public actor CineoVideoCursorTracker {
         let width = min(0.075, max(0.018, 44.0 / videoSize.width))
         let height = min(0.10, max(0.025, 52.0 / videoSize.height))
         let visionX = max(0, min(1 - width, hotspotX - width * 0.35))
-        let visionY = max(0, min(1 - height, 1 - hotspotY - height * 0.65))
+        let visionY = max(0, min(1 - height, 1 - hotspotY - height * 0.35))
         let initial = VNDetectedObjectObservation(
             boundingBox: CGRect(x: visionX, y: visionY, width: width, height: height))
         let tracker = VNTrackObjectRequest(detectedObjectObservation: initial)
