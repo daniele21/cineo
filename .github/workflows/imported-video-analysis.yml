@@ -30,7 +30,7 @@ jobs:
         run: swift build --package-path Packages/CineoVideoAnalysis --configuration release
       - name: Verify local cache persistence, fingerprint invalidation and safe seed
         run: swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-video-smoke
-      - name: Measure synthetic H264 cursor tracking (exploratory, not a quality gate)
+      - name: Gate synthetic H264 cursor precision and coverage
         run: |
           set -euo pipefail
           swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-cursor-benchmark | tee cursor-benchmark.log
