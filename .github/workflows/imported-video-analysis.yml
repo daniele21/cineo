@@ -1,0 +1,43 @@
+name: Imported video Vision tracker — CLT macOS
+on:
+  pull_request:
+    paths:
+      - 'Packages/CineoVideoAnalysis/**'
+      - 'Packages/CineoDirector/**'
+      - 'Apps/Cineo/**'
+      - '.github/workflows/imported-video-analysis.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vision-package:
+    name: SwiftPM native Vision tracking (no Xcode)
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Library/Developer/CommandLineTools
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check standalone Apple CLI toolchain
+        run: |
+          set -euo pipefail
+          test "$(xcode-select -p)" = /Library/Developer/CommandLineTools
+          xcrun --sdk macosx --show-sdk-path
+          swift --version
+      - name: Compile pixel-analysis and Vision tracking
+        run: swift build --package-path Packages/CineoVideoAnalysis --configuration release
+      - name: Compile complete native Cineo Studio
+        run: swift build --package-path Apps/Cineo --configuration release
+
+  deterministic-attention:
+    name: Strict provenance and safe inferred dwells
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.2
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test output-clock mapping and inferred dwell behavior
+        run: swift test --package-path Packages/CineoDirector --filter CineoImportedVideoAttentionTests
