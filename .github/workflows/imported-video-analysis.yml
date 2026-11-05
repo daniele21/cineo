@@ -33,6 +33,7 @@ jobs:
       - name: Gate synthetic H264 cursor precision and coverage
         env:
           CINEO_CURSOR_TRACE: "1"
+          CINEO_CURSOR_SAVE_SYNTHETIC: "1"
         run: |
           set -euo pipefail
           swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-cursor-benchmark | tee cursor-benchmark.log
@@ -40,8 +41,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cineo-imported-cursor-synthetic-quality
-          path: cursor-benchmark.log
-          retention-days: 14
+          path: |
+            cursor-benchmark.log
+            cursor-synthetic-debug.mp4
+          retention-days: 7
       - name: Compile complete native Cineo Studio
         run: swift build --package-path Apps/Cineo --configuration release
 
