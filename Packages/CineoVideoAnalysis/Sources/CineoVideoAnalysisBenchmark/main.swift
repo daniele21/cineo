@@ -53,15 +53,22 @@ struct CineoImportedCursorBenchmark {
             }
             let avg = known.reduce(0, +) / Double(known.count)
             let highQuality = report.samples.filter { $0.confidence >= 0.65 }.count
-            print(String(format: "CURSOR_BENCHMARK samples=%d confident=%d meanErrorPx=%.2f maxErrorPx=%.2f",
-                         known.count, highQuality, avg, known.max() ?? 0))
+            let lastTracked = report.samples.last?.sourceSeconds ?? 0
+            let coverage = Double(known.count) / 12.0
+            print(String(format: "CURSOR_BENCHMARK samples=%d confident=%d meanErrorPx=%.2f maxErrorPx=%.2f coverage=%.2f lastTracked=%.2f",
+                         known.count, highQuality, avg, known.max() ?? 0, coverage, lastTracked))
+            guard known.count >= 9, highQuality >= 8,
+                  avg <= 8, (known.max() ?? .infinity) <= 16 else {
+                throw BenchmarkError.qualityFailed
+            }
         } else {
             print("CURSOR_BENCHMARK samples=0 confident=0 result=lost-track")
+            throw BenchmarkError.qualityFailed
         }
-        print("PASS: deterministic synthetic fixture created and source SHA unchanged")
+        print("PASS: synthetic H264 cursor accuracy and original source SHA unchanged")
     }
 
-    enum BenchmarkError: Error { case writerFailed, sourceModified }
+    enum BenchmarkError: Error { case writerFailed, sourceModified, qualityFailed }
 
     static func generateVideo(_ url: URL) async throws {
         let width = 640, height = 360
