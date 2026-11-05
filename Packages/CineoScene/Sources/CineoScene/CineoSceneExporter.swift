@@ -17,6 +17,7 @@ public struct CineoSceneExporter: Sendable {
     public func export(source: URL, destination: URL,
                        plan: CineoScenePlan,
                        cuts: CineoCutList? = nil,
+                       cursor: CineoCursorOverlay? = nil,
                        onProgress: (@Sendable (Double) -> Void)? = nil) async throws {
         try plan.validate()
         guard source.isFileURL, destination.isFileURL, source != destination,
@@ -127,7 +128,8 @@ public struct CineoSceneExporter: Sendable {
                 else { throw CineoSceneError.writerFailed }
                 let raw = CIImage(cvPixelBuffer: inputBuffer)
                 let edited = try CineoSceneFrameRenderer.compose(
-                    raw, at: outputSeconds, with: plan
+                    raw, at: outputSeconds, with: plan,
+                    cursor: cursor, cursorSourceSeconds: relativePTS.seconds
                 )
                 ciContext.render(edited, to: newBuffer, bounds: outputBounds, colorSpace: colorSpace)
                 while !writerInput.isReadyForMoreMediaData {
