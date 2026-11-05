@@ -969,10 +969,11 @@ final class CineoEditorModel: ObservableObject {
         isChoosingImportedCursor = false
         status = "Analisi cursore locale in corso. Puoi annullarla; il video non viene modificato."
         let tracker = CineoVideoCursorTracker()
+        let videoLength = sourceDuration
         importedVideoAnalysisTask = Task { [weak self] in
             do {
                 let report = try await tracker.analyze(
-                    videoURL: source, expectedSourceDuration: sourceDuration,
+                    videoURL: source, expectedSourceDuration: videoLength,
                     seedSourceSeconds: atSource, hotspotX: sx, hotspotY: sy,
                     progress: { [weak self] fraction in
                         Task { @MainActor [weak self] in
@@ -1013,13 +1014,20 @@ final class CineoEditorModel: ObservableObject {
 
     func applyCursorFollow() {
         guard sourceURL != nil, !isExporting, !autoEditPreviewEnabled,
-              let pointerSidecar, hasPointerMovement else {
-            status = "Segui cursore richiede telemetria di movimento e nessuna proposta Auto Edit aperta."
+              hasPointerMovement else {
+            status = "Segui cursore richiede movimenti attendibili e nessuna proposta Auto Edit aperta."
             return
         }
-        // A cut changes the output clock. Never interpolate across a deleted
-        // region: removed events have no output timestamp and are dropped.
-        let movements = pointerSidecar.events.compactMap { event -> CineoPointerEvent? in
+        // Native telemetry has priority; inferred video coordinates are only
+        // used when no recorded mouse movements exist.
+        let sourceMovements: [CineoPointerEvent]
+        if let events = pointerSidecar?.events.filter({ $0.kind == .moved }), !events.isEmpty {
+            sourceMovements = events
+        } else {
+            sourceMovements = importedAnalysis?.movementEvents() ?? []
+        }
+        // A cut changes the output clock. Never interpolate across a deleted region.
+        let movements = sourceMovements.compactMap { event -> CineoPointerEvent? in
             guard event.kind == .moved else { return nil }
             let time = cutList?.outputTime(forSourceSeconds: event.sourceSeconds) ??
                        (cutList == nil ? event.sourceSeconds : nil)
@@ -1068,36 +1076,52 @@ final class CineoEditorModel: ObservableObject {
     }
 
     func proposeAutoEdit() {
-        guard sourceURL != nil, let pointerSidecar else {
-            status = "Nessun click registrato. Per Auto Edit, abilita «Registra click» prima della cattura."
+        guard sourceURL != nil, !isExporting else { return }
+        let draft: CineoAutoEditProposal
+        let origin: String
+        if hasPointerEvents, let pointerSidecar {
+            let editSidecar: CineoPointerSidecar
+            if let cutList {
+                let mapped = pointerSidecar.events.compactMap { event -> CineoPointerEvent? in
+                    guard let time = cutList.outputTime(forSourceSeconds: event.sourceSeconds)
+                    else { return nil }
+                    return CineoPointerEvent(sourceSeconds: time, x: event.x,
+                                             y: event.y, kind: event.kind)
+                }
+                guard let sidecar = try? CineoPointerSidecar(events: mapped) else {
+                    status = "Telemetria click non valida dopo i tagli."
+                    return
+                }
+                editSidecar = sidecar
+            } else {
+                editSidecar = pointerSidecar
+            }
+            draft = CineoAutoEditPlanner().propose(
+                sidecar: editSidecar, duration: duration, preset: autoEditPreset)
+            origin = "click registrati"
+        } else if let analysis = importedAnalysis {
+            let cuts = cutList
+            let mapper: @Sendable (Double) -> Double? = { seconds in
+                if let cuts { return cuts.outputTime(forSourceSeconds: seconds) }
+                return seconds
+            }
+            draft = CineoImportedVideoAttentionPlanner().propose(
+                analysis: analysis, outputDuration: duration,
+                cutMapper: mapper, preset: autoEditPreset)
+            origin = "soste stimate del cursore (nessun click dedotto)"
+        } else {
+            status = "Per un MP4 esterno seleziona «Analizza cursore nel video». Per una registrazione Cineo abilita i click."
             return
         }
-        let editSidecar: CineoPointerSidecar
-        if let cutList {
-            let mapped = pointerSidecar.events.compactMap { event -> CineoPointerEvent? in
-                guard let time = cutList.outputTime(forSourceSeconds: event.sourceSeconds) else { return nil }
-                return CineoPointerEvent(sourceSeconds: time, x: event.x,
-                                         y: event.y, kind: event.kind)
-            }
-            guard let sidecar = try? CineoPointerSidecar(events: mapped) else {
-                status = "Telemetria click non valida dopo i tagli."
-                return
-            }
-            editSidecar = sidecar
-        } else {
-            editSidecar = pointerSidecar
-        }
-        let draft = CineoAutoEditPlanner().propose(
-            sidecar: editSidecar, duration: duration, preset: autoEditPreset)
         autoEditShots = draft.shots
         autoEditSelectedIndices = Set(draft.shots.indices)
         autoEditShotCount = draft.shots.count
         autoEditCamera = draft.keyframes
         autoEditPreviewEnabled = !draft.isEmpty
         if draft.isEmpty {
-            status = "Nessuno zoom utile rilevato: il video rimane invariato."
+            status = "Nessuno zoom attendibile rilevato da \(origin): il video resta invariato."
         } else {
-            status = "Anteprima non salvata: \(draft.shots.count) proposte di Smart Camera. Premi «Applica zoom» per confermare."
+            status = "Anteprima da \(origin): \(draft.shots.count) zoom modificabili. Conferma con «Applica zoom»."
         }
         refreshPreview()
     }
