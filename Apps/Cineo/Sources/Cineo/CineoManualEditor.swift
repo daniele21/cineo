@@ -12,6 +12,7 @@ import CineoMusic
 import CineoAudio
 import CineoEvents
 import CineoDirector
+import CineoVideoAnalysis
 import CryptoKit
 
 @MainActor
@@ -158,6 +159,15 @@ final class CineoEditorModel: ObservableObject {
     @Published var autoEditPreset: CameraPreset = .balanced
     @Published private(set) var hasPointerEvents = false
     @Published private(set) var hasPointerMovement = false
+    @Published private(set) var importedAnalysis: CineoImportedPointerAnalysis?
+    @Published private(set) var isAnalyzingImportedVideo = false
+    @Published private(set) var importedAnalysisProgress: Double = 0
+    @Published var isChoosingImportedCursor = false
+    private var importedVideoAnalysisTask: Task<Void, Never>?
+    private var importedAnalysisRequest = UUID()
+    var hasImportedVideoMotion: Bool {
+        (importedAnalysis?.movementEvents().count ?? 0) >= 3
+    }
     private var cursorFollowUndo: (before: [CineoCameraKeyframe], after: [CineoCameraKeyframe])?
     var canUndoCursorFollow: Bool { cursorFollowUndo?.after == keyframes }
     @Published private(set) var autoEditShotCount = 0
@@ -910,6 +920,95 @@ final class CineoEditorModel: ObservableObject {
             ? "Feedback click attivato: anelli discreti sincronizzati nell'anteprima e nell'export."
             : "Feedback click disattivato. Il cursore originale resta invariato."
         refreshPreview()
+    }
+
+    /// Explicit user seed, never inferred from a click in video pixels.
+    func requestImportedCursorSelection() {
+        guard sourceURL != nil, !isExporting, !isAnalyzingImportedVideo else { return }
+        isChoosingImportedCursor = true
+        pausePreviewPlayback()
+        status = "Seleziona la punta del cursore nel fotogramma. Cineo analizzerà il video localmente a partire da qui."
+    }
+
+    func cancelImportedVideoAnalysis() {
+        importedVideoAnalysisTask?.cancel()
+        importedVideoAnalysisTask = nil
+        importedAnalysisRequest = UUID()
+        isChoosingImportedCursor = false
+        isAnalyzingImportedVideo = false
+        importedAnalysisProgress = 0
+    }
+
+    func trackImportedCursor(atCanvasX x: Double, y: Double) {
+        guard isChoosingImportedCursor, let source = sourceURL,
+              !isExporting, !isSavingProject, !isAnalyzingImportedVideo,
+              let scene = try? currentPlan.evaluate(
+                  time: selectedTime, sourceWidth: sourcePixelWidth,
+                  sourceHeight: sourcePixelHeight),
+              x.isFinite, y.isFinite, (0...1).contains(x), (0...1).contains(y)
+        else { return }
+        let cx = x * Double(outputWidth), cy = y * Double(outputHeight)
+        guard cx >= scene.outputX, cx <= scene.outputX + scene.outputWidth,
+              cy >= scene.outputY, cy <= scene.outputY + scene.outputHeight
+        else {
+            status = "Seleziona il cursore dentro l'area del video, non nello sfondo."
+            return
+        }
+        let sx = scene.cropX + (cx - scene.outputX) / scene.outputWidth * scene.cropWidth
+        let sy = scene.cropY + (cy - scene.outputY) / scene.outputHeight * scene.cropHeight
+        let atSource = cutList?.sourceTime(at: selectedTime) ?? selectedTime
+        guard atSource < sourceDuration - 0.2 else {
+            status = "Per tracciare il cursore scegli un fotogramma precedente alla fine."
+            return
+        }
+        importedVideoAnalysisTask?.cancel()
+        importedAnalysisRequest = UUID()
+        let requestID = importedAnalysisRequest
+        importedAnalysisProgress = 0
+        isAnalyzingImportedVideo = true
+        isChoosingImportedCursor = false
+        status = "Analisi cursore locale in corso. Puoi annullarla; il video non viene modificato."
+        let tracker = CineoVideoCursorTracker()
+        importedVideoAnalysisTask = Task { [weak self] in
+            do {
+                let report = try await tracker.analyze(
+                    videoURL: source, expectedSourceDuration: sourceDuration,
+                    seedSourceSeconds: atSource, hotspotX: sx, hotspotY: sy,
+                    progress: { [weak self] fraction in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.importedAnalysisRequest == requestID,
+                                  self.sourceURL == source else { return }
+                            self.importedAnalysisProgress = fraction
+                        }
+                    })
+                guard let self, !Task.isCancelled,
+                      self.importedAnalysisRequest == requestID,
+                      self.sourceURL == source else { return }
+                self.importedAnalysis = report
+                self.hasPointerMovement = (self.pointerSidecar?.events.contains {
+                    $0.kind == .moved
+                } ?? false) || self.hasImportedVideoMotion
+                do {
+                    if let project = self.projectURL {
+                        try CineoImportedAnalysisStore().save(report, projectURL: project)
+                    } else {
+                        try CineoImportedAnalysisStore().save(report, forVideo: source)
+                    }
+                    self.status = "Tracking locale: \(report.samples.count) posizioni salvate. Ora puoi generare zoom da soste del cursore o applicare Camera Follow."
+                } catch {
+                    self.status = "Tracking riuscito (\(report.samples.count) posizioni), ma cache non salvata: \(error.localizedDescription)."
+                }
+            } catch is CancellationError {
+                guard let self, self.importedAnalysisRequest == requestID else { return }
+                self.status = "Analisi cursore annullata. Il video originale è invariato."
+            } catch {
+                guard let self, self.importedAnalysisRequest == requestID else { return }
+                self.status = "Tracking non riuscito: \(error.localizedDescription). Prova un frame nitido e indica la punta del cursore."
+            }
+            guard let self, self.importedAnalysisRequest == requestID else { return }
+            self.isAnalyzingImportedVideo = false
+            self.importedVideoAnalysisTask = nil
+        }
     }
 
     func applyCursorFollow() {
