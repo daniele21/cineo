@@ -49,14 +49,14 @@ Do not switch users or overwrite a running install.
 
 On a macOS CLT-only host:
 
-\`\`\`sh
+```sh
 bash scripts/test-cineo.sh --preflight
 bash scripts/test-cineo.sh --quick
 swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-video-smoke
 CINEO_CURSOR_TRACE=1 swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-cursor-benchmark
 swift build --package-path Apps/Cineo --configuration release
 bash scripts/test-cineo.sh --native
-\`\`\`
+```
 
 A green compiler/build or synthetic benchmark **does not** mean the visual
 acceptance matrix passed. The latter still needs physical macOS inspection,
