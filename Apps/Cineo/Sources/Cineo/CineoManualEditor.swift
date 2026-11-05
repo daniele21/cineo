@@ -1074,7 +1074,9 @@ final class CineoEditorModel: ObservableObject {
         } else {
             pointerSidecar = try? CineoPointerRecordingStore().load(for: original)
         }
-        hasPointerEvents = !(pointerSidecar?.events.isEmpty ?? true)
+        hasPointerEvents = pointerSidecar?.events.contains(where: {
+            $0.kind == .leftClick || $0.kind == .rightClick
+        }) ?? false
         hasPointerMovement = pointerSidecar?.events.contains(where: { $0.kind == .moved }) ?? false
         cursorFollowUndo = nil
         if let sidecar = pointerSidecar {
