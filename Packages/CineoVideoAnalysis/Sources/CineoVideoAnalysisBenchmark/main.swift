@@ -92,9 +92,12 @@ struct CineoImportedCursorBenchmark {
         try await CineoSceneExporter().export(
             source: video, destination: rendered, plan: scene)
         let assetOut = AVURLAsset(url: rendered)
-        guard let outTrack = try await assetOut.loadTracks(withMediaType: .video).first,
-              abs((try await assetOut.load(.duration)).seconds - sourceSeconds) < 0.35,
-              (try await outTrack.load(.naturalSize)).width == 320,
+        guard let outTrack = try await assetOut.loadTracks(withMediaType: .video).first
+        else { throw BenchmarkError.invalidExport }
+        let outDuration = try await assetOut.load(.duration)
+        let outSize = try await outTrack.load(.naturalSize)
+        guard abs(outDuration.seconds - sourceSeconds) < 0.35,
+              outSize.width == 320, outSize.height == 180,
               SHA256.hash(data: try Data(contentsOf: video)) == digestBefore
         else { throw BenchmarkError.invalidExport }
         print("PASS: inferred dwell -> editable Smart Camera keyframes -> real H264 320x180")
