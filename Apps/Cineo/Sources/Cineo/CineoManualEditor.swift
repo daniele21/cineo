@@ -57,6 +57,9 @@ final class CineoEditorModel: ObservableObject {
     @Published var keyframes: [CineoCameraKeyframe] = []
     @Published var autoEditPreset: CameraPreset = .balanced
     @Published private(set) var hasPointerEvents = false
+    @Published private(set) var hasPointerMovement = false
+    private var cursorFollowUndo: (before: [CineoCameraKeyframe], after: [CineoCameraKeyframe])?
+    var canUndoCursorFollow: Bool { cursorFollowUndo?.after == keyframes }
     @Published private(set) var autoEditShotCount = 0
     @Published private(set) var autoEditPreviewEnabled = false
     @Published private(set) var autoEditShots: [CameraShot] = []
@@ -807,6 +810,62 @@ final class CineoEditorModel: ObservableObject {
         refreshPreview()
     }
 
+    func applyCursorFollow() {
+        guard sourceURL != nil, !isExporting, !autoEditPreviewEnabled,
+              let pointerSidecar, hasPointerMovement else {
+            status = "Segui cursore richiede telemetria di movimento e nessuna proposta Auto Edit aperta."
+            return
+        }
+        // A cut changes the output clock. Never interpolate across a deleted
+        // region: removed events have no output timestamp and are dropped.
+        let movements = pointerSidecar.events.compactMap { event -> CineoPointerEvent? in
+            guard event.kind == .moved else { return nil }
+            let time = cutList?.outputTime(forSourceSeconds: event.sourceSeconds) ??
+                       (cutList == nil ? event.sourceSeconds : nil)
+            guard let time else { return nil }
+            return .init(sourceSeconds: time, x: event.x, y: event.y, kind: .moved)
+        }
+        let before = keyframes
+        do {
+            var baseline = currentPlan
+            baseline.camera = before
+            let proposed = try CineoCameraFollowPlanner().propose(
+                base: baseline, movements: movements, duration: duration)
+            guard proposed != before else {
+                status = "Nessun pan necessario: il cursore rimane nella zona sicura o non ci sono zoom attivi."
+                return
+            }
+            pausePreviewPlayback()
+            keyframes = proposed
+            if !savePlan() {
+                keyframes = before
+                return
+            }
+            cursorFollowUndo = (before: before, after: proposed)
+            importedActionMarkers = []
+            status = "Camera Follow: aggiunti \(proposed.count - before.count) keyframe, senza sostituire quelli manuali."
+            refreshPreview()
+        } catch {
+            status = "Camera Follow non applicata: \(error.localizedDescription)"
+        }
+    }
+
+    func undoCursorFollow() {
+        guard let snapshot = cursorFollowUndo, keyframes == snapshot.after else {
+            cursorFollowUndo = nil
+            return
+        }
+        pausePreviewPlayback()
+        keyframes = snapshot.before
+        if savePlan() {
+            cursorFollowUndo = nil
+            status = "Camera Follow annullata; keyframe precedenti ripristinati."
+            refreshPreview()
+        } else {
+            keyframes = snapshot.after
+        }
+    }
+
     func proposeAutoEdit() {
         guard sourceURL != nil, let pointerSidecar else {
             status = "Nessun click registrato. Per Auto Edit, abilita «Registra click» prima della cattura."
@@ -913,6 +972,8 @@ final class CineoEditorModel: ObservableObject {
             pointerSidecar = try? CineoPointerRecordingStore().load(for: original)
         }
         hasPointerEvents = !(pointerSidecar?.events.isEmpty ?? true)
+        hasPointerMovement = pointerSidecar?.events.contains(where: { $0.kind == .moved }) ?? false
+        cursorFollowUndo = nil
         if let sidecar = pointerSidecar {
             clickHighlightMarkers = sidecar.events.compactMap { e in
                 guard e.kind == .leftClick || e.kind == .rightClick else { return nil }
@@ -952,6 +1013,8 @@ final class CineoEditorModel: ObservableObject {
         outputURL = nil
         pointerSidecar = nil
         hasPointerEvents = false
+        hasPointerMovement = false
+        cursorFollowUndo = nil
         autoEditPreviewEnabled = false
         showClickHighlights = false
         clickHighlightMarkers = []
@@ -2044,6 +2107,16 @@ struct CineoManualEditorView: View {
                     }
                     .disabled(editor.sourceURL == nil || editor.isExporting)
                     .help("Profilo della camera: l'anteprima e l'export condividono la stessa curva.")
+                    HStack(spacing: 8) {
+                        Button("Segui cursore negli zoom") { editor.applyCursorFollow() }
+                            .disabled(!editor.hasPointerMovement || editor.isExporting ||
+                                      editor.autoEditPreviewEnabled)
+                        Button("Annulla follow") { editor.undoCursorFollow() }
+                            .disabled(!editor.canUndoCursorFollow || editor.isExporting)
+                    }
+                    .font(.caption)
+                    Text("Camera Follow interviene solo quando il cursore esce dalla zona sicura, senza sovrascrivere i tuoi zoom.")
+                        .font(.caption2).foregroundStyle(.secondary)
                     Toggle("Evidenzia click", isOn: Binding(
                         get: { editor.showClickHighlights },
                         set: { editor.setClickHighlights($0) }
