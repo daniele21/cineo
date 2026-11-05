@@ -12,6 +12,18 @@ Changes are deliberately presentation-only: source video, non-destructive
 edit/save, AVFoundation/Core Image export, queued ACE-Step generation, and
 cancel/undo rules keep their previous implementations.
 
+## Capture dashboard contract
+
+- No fixed 620-pt content width. The dashboard scrolls vertically and adapts
+  from one column to two around 850 pt.
+- Recording / opening a video is the principal action, clearly separated from
+  optional microphone, system audio and pointer telemetry.
+- The five recording options wrap into a responsive grid instead of overflowing
+  on one row. Options remain visible by default.
+- The recording phase, elapsed time, file size and progress explanation stay
+  prominent. The Activity log stays visible and auto-scrolls as new entries arrive.
+- Developer identity is retained but visually de-emphasized.
+
 ## Layout contract
 
 - At widths >= 1060 pt: preview/timeline flexible on the left; 304-pt inspector
@@ -33,6 +45,8 @@ Do not switch users or overwrite a running install.
 
 | Window / media | Actions | Pass criteria |
 | --- | --- | --- |
+| 620×490, capture | Inspect primary controls, recording options and log | No horizontal overflow; options wrap; record/stop accessible |
+| 900×700, capture | Resize, start and stop a short recording | Actions remain reachable, phase and logs visible |
 | 720×560, landscape MP4 | Scroll preview → timeline → Smart inspector | Preview entirely visible; export remains visible; no horizontal window overflow |
 | 980×700, landscape | Resize repeatedly across 1060-pt breakpoint | No clipped controls or jump to stale preview; inspector accessible |
 | 1280×800, landscape | Switch Smart / Camera / Stile | Inspector scrolls, preview and export remain in place |
