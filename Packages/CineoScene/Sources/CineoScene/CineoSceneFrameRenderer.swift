@@ -7,7 +7,9 @@ import CoreGraphics
 /// function with the same output-time camera plan. No approximation.
 public enum CineoSceneFrameRenderer {
     public static func compose(_ source: CIImage, at seconds: Double,
-                               with plan: CineoScenePlan) throws -> CIImage {
+                               with plan: CineoScenePlan,
+                               cursor: CineoCursorOverlay? = nil,
+                               cursorSourceSeconds: Double? = nil) throws -> CIImage {
         let state = try plan.evaluate(
             time: seconds,
             sourceWidth: Int(source.extent.width),
@@ -53,7 +55,50 @@ public enum CineoSceneFrameRenderer {
                 output = layer.composited(over: output).cropped(to: canvas)
             }
         }
+        // The independent pointer is rendered ONLY when the recording sidecar
+        // explicitly declares that ScreenCaptureKit hid the original pointer.
+        if let pointer = cursor?.position(atSourceTime: cursorSourceSeconds ?? seconds) {
+            let rx = (pointer.x - state.cropX) / state.cropWidth
+            let ry = (pointer.y - state.cropY) / state.cropHeight
+            if (0...1).contains(rx), (0...1).contains(ry),
+               let arrow = pointerImage() {
+                let hotspotX = state.outputX + rx * state.outputWidth
+                let hotspotY = state.outputY + (1 - ry) * state.outputHeight
+                // Cursor path hotspot is (3,59) in the native image; keep
+                // that exact pixel aligned to its source-normalized coordinate.
+                let placed = arrow.transformed(by: CGAffineTransform(
+                    translationX: hotspotX - 3, y: hotspotY - 59))
+                output = placed.composited(over: output).cropped(to: canvas)
+            }
+        }
         return output
+    }
+
+    /// Independently designed native vector glyph. No upstream cursor artwork.
+    private static func pointerImage() -> CIImage? {
+        let width = 48, height = 64
+        guard let context = CGContext(data: nil, width: width, height: height,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        let shape = CGMutablePath()
+        shape.move(to: CGPoint(x: 3, y: 59)) // exact click hotspot
+        shape.addLine(to: CGPoint(x: 4, y: 12))
+        shape.addLine(to: CGPoint(x: 15, y: 24))
+        shape.addLine(to: CGPoint(x: 23, y: 7))
+        shape.addLine(to: CGPoint(x: 30, y: 11))
+        shape.addLine(to: CGPoint(x: 22, y: 27))
+        shape.addLine(to: CGPoint(x: 41, y: 27))
+        shape.closeSubpath()
+        context.addPath(shape)
+        context.setFillColor(CGColor(gray: 0.985, alpha: 1))
+        context.setStrokeColor(CGColor(gray: 0.09, alpha: 1))
+        context.setLineJoin(.round)
+        context.setLineWidth(3)
+        context.drawPath(using: .fillStroke)
+        guard let image = context.makeImage() else { return nil }
+        return CIImage(cgImage: image)
     }
 
     /// Small transparent vector-derived bitmap rendered only during click
