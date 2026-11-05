@@ -62,6 +62,8 @@ final class CineoEditorModel: ObservableObject {
     @Published private(set) var autoEditSelectedIndices = Set<Int>()
     var autoEditSelectedCount: Int { autoEditSelectedIndices.count }
     private var pointerSidecar: CineoPointerSidecar?
+    private var cursorOverlay: CineoCursorOverlay?
+    var usesIndependentCursor: Bool { cursorOverlay != nil }
     private var autoEditCamera: [CineoCameraKeyframe] = []
     @Published private(set) var importedActionMarkers: [ImportedActionMarker] = []
     @Published var showingInstructions = false
@@ -905,6 +907,7 @@ final class CineoEditorModel: ObservableObject {
 
     private func loadPointerEvents(for original: URL, source: URL, project: URL?) {
         pointerSidecar = nil
+        cursorOverlay = nil
         if let project {
             pointerSidecar = try? CineoPointerSidecarStore().load(projectURL: project)
         } else {
@@ -912,6 +915,11 @@ final class CineoEditorModel: ObservableObject {
         }
         hasPointerEvents = !(pointerSidecar?.events.isEmpty ?? true)
         if let sidecar = pointerSidecar {
+            // Schema v1 and embedded-cursor recordings NEVER draw another
+            // pointer. Only v2 sidecars captured with a hidden cursor qualify.
+            if sidecar.cursorMode == .independentOverlay {
+                cursorOverlay = try? CineoCursorOverlay(sidecar: sidecar)
+            }
             clickHighlightMarkers = sidecar.events.compactMap { e in
                 guard e.kind == .leftClick || e.kind == .rightClick else { return nil }
                 let time = cutList?.outputTime(forSourceSeconds: e.sourceSeconds) ?? 
@@ -949,6 +957,7 @@ final class CineoEditorModel: ObservableObject {
         projectURL = nil
         outputURL = nil
         pointerSidecar = nil
+        cursorOverlay = nil
         hasPointerEvents = false
         autoEditPreviewEnabled = false
         showClickHighlights = false
@@ -1551,6 +1560,7 @@ final class CineoEditorModel: ObservableObject {
         let plan = currentPlan
         let seconds = selectedTime
         let sourceSeconds = cutList?.sourceTime(at: seconds) ?? seconds
+        let overlay = cursorOverlay
         loadingPreview = true
         previewTask = Task {
             // A short coalescing window avoids decoding every intermediate
@@ -1563,7 +1573,8 @@ final class CineoEditorModel: ObservableObject {
                 )
                 guard !Task.isCancelled, request == previewRequest else { return }
                 let composited = try CineoSceneFrameRenderer.compose(
-                    CIImage(cgImage: cgImage), at: seconds, with: plan
+                    CIImage(cgImage: cgImage), at: seconds, with: plan,
+                    cursor: overlay, cursorSourceSeconds: sourceSeconds
                 )
                 let canvas = CGRect(x: 0, y: 0,
                                     width: CGFloat(plan.outputWidth), height: CGFloat(plan.outputHeight))
@@ -1659,7 +1670,8 @@ final class CineoEditorModel: ObservableObject {
         do {
             let plan = currentPlan
             let stage = try CineoSceneFrameRenderer.compose(
-                CIImage(cvPixelBuffer: buffer), at: seconds, with: plan
+                CIImage(cvPixelBuffer: buffer), at: seconds, with: plan,
+                cursor: cursorOverlay, cursorSourceSeconds: sourceSeconds
             )
             // Present a bounded ~960px proxy to reduce preview GPU load.
             // Same scene geometry and easing as final 1920/1080p export.
@@ -1696,6 +1708,7 @@ final class CineoEditorModel: ObservableObject {
         pausePreviewPlayback()
         let plan = currentPlan
         let exportCuts = cutList
+        let exportCursor = cursorOverlay
         // Freeze the music plan at export start; UI changes must not alter a
         // render already in progress.
         let exportMusicURL = musicURL
@@ -1733,7 +1746,8 @@ final class CineoEditorModel: ObservableObject {
                 let videoOnly = folder.appendingPathComponent("." + UUID().uuidString + "-silent.mp4")
                 defer { try? FileManager.default.removeItem(at: videoOnly) }
                 try await CineoSceneExporter().export(
-                    source: url, destination: videoOnly, plan: plan, cuts: exportCuts
+                    source: url, destination: videoOnly, plan: plan, cuts: exportCuts,
+                    cursor: exportCursor
                 ) { [weak self] progress in
                     Task { @MainActor [weak self] in self?.exportProgress = progress * 0.85 }
                 }
