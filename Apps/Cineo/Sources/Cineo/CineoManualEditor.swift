@@ -1192,6 +1192,7 @@ final class CineoEditorModel: ObservableObject {
     private func loadPointerEvents(for original: URL, source: URL, project: URL?) {
         pointerSidecar = nil
         cursorOverlay = nil
+        importedAnalysis = nil
         if let project {
             pointerSidecar = try? CineoPointerSidecarStore().load(projectURL: project)
         } else {
@@ -1200,7 +1201,15 @@ final class CineoEditorModel: ObservableObject {
         hasPointerEvents = pointerSidecar?.events.contains(where: {
             $0.kind == .leftClick || $0.kind == .rightClick
         }) ?? false
-        hasPointerMovement = pointerSidecar?.events.contains(where: { $0.kind == .moved }) ?? false
+        let cache = CineoImportedAnalysisStore()
+        let cached = project == nil
+            ? try? cache.load(forVideo: source)
+            : try? cache.load(projectURL: project!)
+        if let cached, abs(cached.sourceDuration - sourceDuration) < 0.2 {
+            importedAnalysis = cached
+        }
+        hasPointerMovement = (pointerSidecar?.events.contains(where: { $0.kind == .moved }) ?? false)
+            || hasImportedVideoMotion
         cursorFollowUndo = nil
         if let sidecar = pointerSidecar {
             if sidecar.cursorMode == .independentOverlay {
@@ -1225,6 +1234,8 @@ final class CineoEditorModel: ObservableObject {
 
     func open(_ url: URL) async {
         guard !isExporting && !isSavingProject else { return }
+        cancelImportedVideoAnalysis()
+        importedAnalysis = nil
         status = "Caricamento del video o progetto…"
         pausePreviewPlayback()
         // Music jobs are owned by the application queue; no cancellation on navigation.
@@ -1401,13 +1412,22 @@ final class CineoEditorModel: ObservableObject {
                         status = "Progetto salvato senza telemetria click: \(error.localizedDescription)"
                     }
                 }
+                var importedCacheWarning = ""
+                if let importedAnalysis {
+                    do {
+                        try CineoImportedAnalysisStore().save(importedAnalysis,
+                                                              projectURL: location)
+                    } catch {
+                        importedCacheWarning = " · Analisi cursore non archiviata: \(error.localizedDescription)"
+                    }
+                }
                 musicQueue.relinkVideo(from: source, to: savedSource)
                 projectURL = location
                 sourceURL = savedSource
                 if musicAsset != nil { prepareMusicPlayer() }
                 if savePlan() {
                     saveMusicSettings()
-                    status = "Progetto Cineo salvato: \(location.lastPathComponent)"
+                    status = "Progetto Cineo salvato: \(location.lastPathComponent)" + importedCacheWarning
                 }
             } catch {
                 status = "Salvataggio progetto fallito: \(error.localizedDescription). Il video originale è intatto."
@@ -1512,6 +1532,9 @@ final class CineoEditorModel: ObservableObject {
             status = "Termina o annulla l'esportazione prima di chiudere l'editor."
             return
         }
+        cancelImportedVideoAnalysis()
+        importedAnalysis = nil
+        hasPointerMovement = false
         pausePreviewPlayback()
         // Music jobs are owned by the application queue; no cancellation on navigation.
         musicPlayer = nil
