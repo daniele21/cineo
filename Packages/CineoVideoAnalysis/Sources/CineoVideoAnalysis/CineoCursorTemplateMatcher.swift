@@ -110,6 +110,11 @@ struct CineoCursorTemplateMatcher {
             }
         }
         let rmse = sqrt(Double(best) / Double(sampleOffsets.count))
+        if ProcessInfo.processInfo.environment["CINEO_CURSOR_TRACE"] == "1" {
+            print(String(format:
+                "CURSOR_MATCH center=(%d,%d) best=(%d,%d) rmse=%.2f accepted=%d",
+                centerX, centerY, bestX, bestY, rmse, rmse <= 40 ? 1 : 0))
+        }
         guard rmse <= 40 else { return nil }
         return .init(x: Double(bestX) / Double(width),
                      y: Double(bestY) / Double(height),
