@@ -96,6 +96,9 @@ public actor CineoVideoCursorTracker {
             .init(sourceSeconds: seedSourceSeconds, x: hotspotX, y: hotspotY, confidence: 1)
         ]
         var failures = 0
+        // Disabled by default. The benchmark opt-in reports only synthetic
+        // cursor coordinates and confidence; never logs video pixels.
+        let trace = ProcessInfo.processInfo.environment["CINEO_CURSOR_TRACE"] == "1"
         let step = 1 / samplesPerSecond
         var nextTime = seedSourceSeconds + step
         var previousTime = seedSourceSeconds
@@ -108,6 +111,7 @@ public actor CineoVideoCursorTracker {
                     at: CMTime(seconds: nextTime, preferredTimescale: 600),
                     actualTime: &actualTime)
             } catch {
+                if trace { print(String(format: "CURSOR_TRACE decode-failed time=%.3f", nextTime)) }
                 failures += 1
                 if failures >= 4 { break }
                 nextTime += step
@@ -122,6 +126,16 @@ public actor CineoVideoCursorTracker {
                 // Visual patch matching remains available if Vision rejects a frame.
             }
             let patch = templateMatcher?.locate(in: image, aroundX: latestX, y: latestY)
+            if trace {
+                print(String(format:
+                    "CURSOR_TRACE time=%.3f actual=%.3f last=(%.1f,%.1f) patch=(%.1f,%.1f,%.2f,rmse=%.1f) vision=%.2f",
+                    nextTime, CMTimeGetSeconds(actualTime),
+                    latestX * Double(image.width), latestY * Double(image.height),
+                    (patch?.x ?? -1) * Double(image.width),
+                    (patch?.y ?? -1) * Double(image.height),
+                    patch?.confidence ?? -1, patch?.errorPixels ?? -1,
+                    Double(observation?.confidence ?? -1)))
+            }
             let x: Double, y: Double, confidence: Double
             if let patch, patch.confidence >= 0.65 {
                 x = patch.x
