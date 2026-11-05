@@ -127,12 +127,17 @@ struct CaptureLogEntry: Identifiable {
     }
 }
 
+@MainActor
+private final class CineoCaptureDashboardLayoutState: ObservableObject {
+    @Published var recordingOptionsExpanded = true
+}
+
 private struct CaptureDashboard: View {
     @ObservedObject var recorder: CineoScreenRecorder
     @ObservedObject var editor: CineoEditorModel
     let onEditVideo: (URL) -> Void
 
-    @State private var recordingOptionsExpanded = true
+    @StateObject private var layout = CineoCaptureDashboardLayoutState()
 
     private var buildRevision: String {
         Bundle.main.object(forInfoDictionaryKey: "CineoSourceCommit") as? String ?? "unknown"
@@ -266,7 +271,7 @@ private struct CaptureDashboard: View {
 
     private var captureOptions: some View {
         VStack(alignment: .leading, spacing: 10) {
-            DisclosureGroup("Opzioni di registrazione", isExpanded: $recordingOptionsExpanded) {
+            DisclosureGroup("Opzioni di registrazione", isExpanded: $layout.recordingOptionsExpanded) {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 175), alignment: .leading)],
                           alignment: .leading, spacing: 10) {
                     Toggle("Audio sistema", isOn: $recorder.captureSystemAudio)
