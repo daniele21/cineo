@@ -54,6 +54,106 @@ final class CineoEditorModel: ObservableObject {
     @Published var exportProgress: Double = 0
     @Published var outputURL: URL?
     @Published var keyframes: [CineoCameraKeyframe] = []
+    struct CameraZoomBand: Identifiable {
+        let id: String
+        let startSeconds: Double
+        let endSeconds: Double
+        let peakZoom: Double
+        let firstIndex: Int
+        let lastIndex: Int
+    }
+    private var cameraBandUndo: (before: [CineoCameraKeyframe], after: [CineoCameraKeyframe])?
+    var canUndoCameraBandMove: Bool { cameraBandUndo?.after == keyframes }
+
+    var cameraZoomBands: [CameraZoomBand] {
+        guard keyframes.count >= 3 else { return [] }
+        var result: [CameraZoomBand] = []
+        var index = 1
+        while index < keyframes.count - 1 {
+            guard keyframes[index].zoom > 1.02 else { index += 1; continue }
+            let start = index - 1
+            var peak = keyframes[index].zoom
+            while index < keyframes.count - 1, keyframes[index].zoom > 1.02 {
+                peak = max(peak, keyframes[index].zoom)
+                index += 1
+            }
+            let end = index
+            if keyframes[start].zoom <= 1.02 && keyframes[end].zoom <= 1.02 &&
+               keyframes[end].time - keyframes[start].time >= 0.1 {
+                result.append(.init(id: "zoom-\(start)-\(end)",
+                   startSeconds: keyframes[start].time,
+                   endSeconds: keyframes[end].time, peakZoom: peak,
+                   firstIndex: start, lastIndex: end))
+            }
+            index = end + 1
+        }
+        return result
+    }
+
+    func moveCameraZoomBand(id: String, deltaSeconds: Double) {
+        guard sourceURL != nil, !isExporting, !autoEditPreviewEnabled,
+              deltaSeconds.isFinite, abs(deltaSeconds) > 0.01,
+              let band = cameraZoomBands.first(where: { $0.id == id }),
+              let region = try? CineoTimelineRegion(
+                id: band.id, startSeconds: band.startSeconds, endSeconds: band.endSeconds)
+        else { return }
+        let siblings = cameraZoomBands.filter { $0.id != id }.compactMap {
+            try? CineoTimelineRegion(
+                id: $0.id, startSeconds: $0.startSeconds, endSeconds: $0.endSeconds)
+        }
+        guard let edit = CineoTimelineEditEngine.applying(
+            .move(startSeconds: band.startSeconds + deltaSeconds),
+            to: region, duration: duration, siblings: siblings) else {
+            status = "Lo spostamento creerebbe una sovrapposizione tra zoom."
+            return
+        }
+        // Other authored keys (outside complete zoom regions) are immutable.
+        let previousTime = band.firstIndex == 0 ? 0 : keyframes[band.firstIndex - 1].time + 0.02
+        let nextTime = band.lastIndex + 1 == keyframes.count
+            ? duration : keyframes[band.lastIndex + 1].time - 0.02
+        guard edit.startSeconds >= previousTime,
+              edit.endSeconds < nextTime,
+              abs(edit.startSeconds - band.startSeconds) >= 0.01 else {
+            status = "Spostamento bloccato vicino ad altri keyframe."
+            return
+        }
+        let shift = edit.startSeconds - band.startSeconds
+        let before = keyframes
+        var after = keyframes
+        for i in band.firstIndex...band.lastIndex {
+            after[i].time += shift
+        }
+        var plan = currentPlan
+        plan.camera = after
+        guard (try? plan.validate()) != nil else { return }
+        pausePreviewPlayback()
+        keyframes = after
+        guard savePlan() else {
+            keyframes = before
+            return
+        }
+        cameraBandUndo = (before: before, after: after)
+        importedActionMarkers = []
+        selectedTime = max(0, min(duration - 0.05, selectedTime + shift))
+        status = "Zoom spostato di \(String(format: "%.2f", shift)) s, clip sorgente preservato."
+        refreshPreview()
+    }
+
+    func undoCameraBandMove() {
+        guard let snapshot = cameraBandUndo, snapshot.after == keyframes else {
+            cameraBandUndo = nil
+            return
+        }
+        pausePreviewPlayback()
+        keyframes = snapshot.before
+        if savePlan() {
+            cameraBandUndo = nil
+            status = "Spostamento zoom annullato."
+            refreshPreview()
+        } else {
+            keyframes = snapshot.after
+        }
+    }
     @Published var autoEditPreset: CameraPreset = .balanced
     @Published private(set) var hasPointerEvents = false
     @Published private(set) var autoEditShotCount = 0
@@ -1940,6 +2040,7 @@ struct CineoManualEditorView: View {
                         .help("Fotogramma successivo")
                         .disabled(editor.sourceURL == nil)
                     }
+                    CineoNativeTimelineView(editor: editor)
                     CineoMusicTimelineStrip(editor: editor)
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Tagli non distruttivi · prima di zoom e musica")
