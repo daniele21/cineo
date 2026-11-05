@@ -4,6 +4,7 @@ import CoreVideo
 import CryptoKit
 import CineoVideoAnalysis
 import CineoDirector
+import CineoScene
 
 /// Exploratory synthetic quality measurement. Non-gating until evaluated
 /// against a diverse set of real, user-consented screen recordings.
@@ -65,10 +66,42 @@ struct CineoImportedCursorBenchmark {
             print("CURSOR_BENCHMARK samples=0 confident=0 result=lost-track")
             throw BenchmarkError.qualityFailed
         }
+        // Full local pipeline: inferred dwell -> editable camera keyframes ->
+        // actual Core Image H264 output. This uses explicitly simulated
+        // position observations so tracking correctness and edit correctness
+        // are tested independently instead of conflating failures.
+        let stable = (1...10).map { index in
+            CineoImportedPointerSample(
+                sourceSeconds: Double(index) * 0.1,
+                x: 0.68, y: 0.36, confidence: 0.95)
+        }
+        let inferred = try CineoImportedPointerAnalysis(
+            sourceDuration: sourceSeconds, seedSourceSeconds: 0.1,
+            samples: stable)
+        let suggestion = CineoImportedVideoAttentionPlanner().propose(
+            analysis: inferred, outputDuration: sourceSeconds,
+            cutMapper: { $0 }, preset: .balanced)
+        guard suggestion.shots.count == 1,
+              suggestion.keyframes.count == 4
+        else { throw BenchmarkError.noAttentionShot }
+        let rendered = root.appendingPathComponent("imported-smartcamera.mp4")
+        let scene = CineoScenePlan(outputWidth: 320, outputHeight: 180,
+                                   paddingFraction: 0.08,
+                                   camera: suggestion.keyframes)
+        try scene.validate()
+        try await CineoSceneExporter().export(
+            source: video, destination: rendered, plan: scene)
+        let assetOut = AVURLAsset(url: rendered)
+        guard let outTrack = try await assetOut.loadTracks(withMediaType: .video).first,
+              abs((try await assetOut.load(.duration)).seconds - sourceSeconds) < 0.35,
+              (try await outTrack.load(.naturalSize)).width == 320,
+              SHA256.hash(data: try Data(contentsOf: video)) == digestBefore
+        else { throw BenchmarkError.invalidExport }
+        print("PASS: inferred dwell -> editable Smart Camera keyframes -> real H264 320x180")
         print("PASS: synthetic H264 cursor accuracy and original source SHA unchanged")
     }
 
-    enum BenchmarkError: Error { case writerFailed, sourceModified, qualityFailed }
+    enum BenchmarkError: Error { case writerFailed, sourceModified, qualityFailed, noAttentionShot, invalidExport }
 
     static func generateVideo(_ url: URL) async throws {
         let width = 640, height = 360
