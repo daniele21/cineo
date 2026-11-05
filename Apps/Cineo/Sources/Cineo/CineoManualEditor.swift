@@ -2133,21 +2133,26 @@ final class CineoEditorModel: ObservableObject {
     }
 }
 
+@MainActor
+private final class CineoStudioLayoutState: ObservableObject {
+    enum InspectorSection: String, CaseIterable {
+        case smart = "Smart"
+        case camera = "Camera"
+        case appearance = "Stile"
+    }
+
+    @Published var inspectorSection: InspectorSection = .smart
+    @Published var cutsExpanded = false
+    @Published var detailsExpanded = false
+}
+
 struct CineoManualEditorView: View {
     @ObservedObject var editor: CineoEditorModel
     let onClose: () -> Void
 
     // Only one inspector topic is shown at a time; the preview remains the
     // primary surface. The same controls are available in compact windows.
-    @State private var inspectorSection: InspectorSection = .smart
-    @State private var cutsExpanded = false
-    @State private var detailsExpanded = false
-
-    private enum InspectorSection: String, CaseIterable {
-        case smart = "Smart"
-        case camera = "Camera"
-        case appearance = "Stile"
-    }
+    @StateObject private var layout = CineoStudioLayoutState()
 
     private func control(_ getter: @escaping () -> Double,
                          _ setter: @escaping (Double) -> Void) -> Binding<Double> {
@@ -2327,7 +2332,7 @@ struct CineoManualEditorView: View {
             CineoNativeTimelineView(editor: editor)
             CineoMusicTimelineStrip(editor: editor)
 
-            DisclosureGroup("Tagli video", isExpanded: $cutsExpanded) {
+            DisclosureGroup("Tagli video", isExpanded: $layout.cutsExpanded) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("I tagli non distruttivi vanno effettuati prima degli zoom e della musica.")
                         .font(.caption)
@@ -2355,7 +2360,7 @@ struct CineoManualEditorView: View {
             .font(.callout)
 
             if !editor.importedActionMarkers.isEmpty || !editor.keyframes.isEmpty {
-                DisclosureGroup("Dettagli azioni e keyframe", isExpanded: $detailsExpanded) {
+                DisclosureGroup("Dettagli azioni e keyframe", isExpanded: $layout.detailsExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
                         if !editor.importedActionMarkers.isEmpty {
                             ScrollView(.horizontal) {
@@ -2518,8 +2523,8 @@ struct CineoManualEditorView: View {
         VStack(alignment: .leading, spacing: 9) {
             Text("Strumenti di modifica")
                 .font(.headline)
-            Picker("Strumenti di modifica", selection: $inspectorSection) {
-                ForEach(InspectorSection.allCases, id: \.self) { section in
+            Picker("Strumenti di modifica", selection: $layout.inspectorSection) {
+                ForEach(CineoStudioLayoutState.InspectorSection.allCases, id: \.self) { section in
                     Text(section.rawValue).tag(section)
                 }
             }
@@ -2530,7 +2535,7 @@ struct CineoManualEditorView: View {
 
     @ViewBuilder
     private var inspectorContent: some View {
-        switch inspectorSection {
+        switch layout.inspectorSection {
         case .smart: smartInspector
         case .camera: cameraInspector
         case .appearance: appearanceInspector
