@@ -93,9 +93,14 @@ struct CineoCursorTemplateMatcher {
                 }
             }
         }
-        scan(radius: 65, stride: 3)
+        // Pixel-sharp cursor outlines can be missed by a stride-3 search.
+        // Try a dense nearby motion window first, then broaden if necessary.
+        scan(radius: 24, stride: 1)
+        if best > sampleOffsets.count * 16 * 16 {
+            scan(radius: 65, stride: 2)
+        }
         if best > sampleOffsets.count * 28 * 28 {
-            scan(radius: 145, stride: 5)
+            scan(radius: 145, stride: 4)
         }
         guard best != Int.max else { return nil }
         let coarseX = bestX, coarseY = bestY
