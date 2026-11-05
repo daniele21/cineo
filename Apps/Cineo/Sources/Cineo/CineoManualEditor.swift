@@ -2137,383 +2137,68 @@ struct CineoManualEditorView: View {
     @ObservedObject var editor: CineoEditorModel
     let onClose: () -> Void
 
+    // Only one inspector topic is shown at a time; the preview remains the
+    // primary surface. The same controls are available in compact windows.
+    @State private var inspectorSection: InspectorSection = .smart
+    @State private var cutsExpanded = false
+    @State private var detailsExpanded = false
+
+    private enum InspectorSection: String, CaseIterable {
+        case smart = "Smart"
+        case camera = "Camera"
+        case appearance = "Stile"
+    }
+
     private func control(_ getter: @escaping () -> Double,
                          _ setter: @escaping (Double) -> Void) -> Binding<Double> {
         Binding(get: getter, set: setter)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack {
-                Button("‹ Registrazione") { onClose() }
-                    .disabled(editor.isExporting || editor.isSavingProject)
-                CineoBrandSymbol(size: 34)
-                Text("Cineo Studio")
-                    .font(CineoBrand.displayFont(size: 23))
-                    .foregroundStyle(.primary) // Auto-adapts brand headline for macOS Dark Mode
-                Spacer()
-                Picker("Modalità", selection: Binding(
-                    get: { editor.mode }, set: { editor.mode = $0 }
-                )) {
-                    ForEach(CineoEditorModel.Mode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
+        GeometryReader { geometry in
+            let compact = geometry.size.width < 1060
+            VStack(spacing: 0) {
+                header(compact: compact)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                Divider()
+
+                if compact {
+                    // A single vertical reading flow, with no horizontal
+                    // overflow or controls hidden behind a narrow sidebar.
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            workspace(availableWidth: max(1, geometry.size.width - 36))
+                            inspectorPanel(scrollable: false)
+                        }
+                        .padding(18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                }
-                .frame(width: 250)
-            }
-            HStack {
-                Text(editor.title).font(.caption).foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer()
-                if editor.projectURL == nil {
-                    Button("Salva progetto Cineo") { editor.saveAsProject() }
-                        .disabled(editor.isSavingProject || editor.isExporting)
                 } else {
-                    Label("Progetto .cineo", systemImage: "checkmark.seal")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                }
-                Button("Importa istruzioni…") {
-                    let panel = NSOpenPanel()
-                    panel.canChooseDirectories = false
-                    panel.allowsMultipleSelection = false
-                    panel.allowedContentTypes = [.json]
-                    panel.message = "Seleziona un file Cineo Actions JSON v1"
-                    if panel.runModal() == .OK, let url = panel.url {
-                        editor.importInstructions(from: url)
-                    }
-                }
-                .disabled(editor.isExporting || editor.isSavingProject || editor.sourceURL == nil)
-                .help("Importa azioni camera.zoom, camera.keyframe e stile da JSON.")
-                Button {
-                    editor.showingMusic = true
-                } label: {
-                    Label("Musica", systemImage: "music.note")
-                }
-                .disabled(editor.sourceURL == nil)
-                CineoMusicQueueButton(editor: editor)
-                Button {
-                    editor.showingInstructions = true
-                } label: {
-                    Label("Mostra istruzioni", systemImage: "curlybraces")
-                }
-                .disabled(editor.sourceURL == nil)
-                .help("Vedi le istruzioni JSON equivalenti al montaggio, la guida e gli esempi.")
-                if editor.isSavingProject { ProgressView().controlSize(.small) }
-            }
-            HStack(alignment: .top, spacing: 18) {
-                VStack(spacing: 10) {
-                    GeometryReader { geo in
-                        let aspect = CGFloat(editor.outputWidth) / CGFloat(editor.outputHeight)
-                        let w = min(geo.size.width, geo.size.height * aspect)
-                        let h = w / aspect
-                        VStack {
-                            Spacer(minLength: 0)
-                            HStack {
-                                Spacer(minLength: 0)
-                                Group {
-                                    if let image = editor.preview {
-                                        Image(nsImage: image)
-                                            .resizable()
-                                            .interpolation(.high)
-                                            .frame(width: w, height: h)
-                                            .onTapGesture { location in
-                                                let x = Double(location.x / w)
-                                                let y = Double(location.y / h)
-                                                if editor.isChoosingImportedCursor {
-                                                    editor.trackImportedCursor(atCanvasX: x, y: y)
-                                                } else {
-                                                    editor.choosePoint(x: x, y: y)
-                                                }
-                                            }
-                                    } else {
-                                        ZStack {
-                                            Color.black.opacity(0.4)
-                                            ProgressView("Preparazione anteprima…")
-                                        }
-                                        .frame(width: w, height: h)
-                                    }
-                                }
-                                Spacer(minLength: 0)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                    }
-                    .frame(width: 720, height: 410)
-                    HStack {
-                        Button {
-                            editor.togglePreviewPlayback()
-                        } label: {
-                            Label(editor.isPreviewPlaying ? "Pausa" : "Play",
-                                  systemImage: editor.isPreviewPlaying ? "pause.fill" : "play.fill")
-                        }
-                        .disabled(editor.sourceURL == nil || editor.isExporting)
-                        .keyboardShortcut(.space, modifiers: [])
-                        .help("Riproduci gli effetti Cineo prima dell'esportazione")
-                        Button { editor.stepPreview(frames: -1) } label: {
-                            Image(systemName: "backward.frame.fill")
-                        }
-                        .help("Fotogramma precedente")
-                        .disabled(editor.sourceURL == nil)
-                        Text(String(format: "%02d:%05.2f",
-                                    Int(editor.selectedTime) / 60,
-                                    editor.selectedTime.truncatingRemainder(dividingBy: 60)))
-                            .font(.caption.monospacedDigit())
-                            .frame(width: 80)
-                        Slider(value: control(
-                            { editor.selectedTime }, { editor.scrub($0) }
-                        ), in: 0...max(0.1, editor.duration - 0.05))
-                        Text(String(format: "%.1f s", editor.duration))
-                            .font(.caption.monospacedDigit())
-                        Button { editor.stepPreview(frames: 1) } label: {
-                            Image(systemName: "forward.frame.fill")
-                        }
-                        .help("Fotogramma successivo")
-                        .disabled(editor.sourceURL == nil)
-                    }
-                    CineoNativeTimelineView(editor: editor)
-                    CineoMusicTimelineStrip(editor: editor)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Tagli non distruttivi · prima di zoom e musica")
-                            .font(.caption.weight(.semibold))
-                        HStack(spacing: 7) {
-                            Button("Inizio") { editor.cutMarkIn = editor.selectedTime }
-                            Text(String(format: "%.1f s", editor.cutMarkIn))
-                                .font(.caption.monospacedDigit())
-                            Button("Fine") { editor.cutMarkOut = editor.selectedTime }
-                            Text(String(format: "%.1f s", editor.cutMarkOut))
-                                .font(.caption.monospacedDigit())
-                            Button("Rimuovi intervallo") { editor.removeMarkedInterval() }
-                                .disabled(editor.sourceURL == nil || editor.isExporting ||
-                                          !editor.keyframes.isEmpty || editor.musicAsset != nil ||
-                                          editor.cutMarkOut <= editor.cutMarkIn)
-                            Button("Undo") { editor.undoCut() }
-                            Button("Redo") { editor.redoCut() }
-                        }
-                        .font(.caption)
-                    }
-                    if editor.isPreviewPlaying {
-                        Text("Anteprima: \(editor.previewActualFPS) fps visualizzati · qualità proxy")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    Text("Seleziona un momento nella timeline, poi clicca sull'anteprima per scegliere il punto d'interesse.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if !editor.importedActionMarkers.isEmpty {
-                        ScrollView(.horizontal) {
-                            HStack(spacing: 6) {
-                                Text("Azioni importate")
-                                    .font(.caption.weight(.semibold))
-                                ForEach(editor.importedActionMarkers) { action in
-                                    Button(action.id) { editor.scrub(action.at) }
-                                        .buttonStyle(.bordered)
-                                        .font(.caption)
-                                        .help(String(format: "Vai al focus a %.2f s", action.at))
-                                }
-                            }
-                        }
-                    }
-                    if !editor.keyframes.isEmpty {
-                        ScrollView(.horizontal) {
-                            HStack(spacing: 6) {
-                                Text("Keyframe").font(.caption.weight(.semibold))
-                                ForEach(editor.keyframes, id: \.time) { key in
-                                    Button(String(format: "%0.1fs · %.1f×", key.time, key.zoom)) {
-                                        editor.scrub(key.time)
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .font(.caption)
-                                }
-                            }
-                        }
-                    }
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Inquadratura").font(.headline)
-                    Text(String(format: "Zoom %.2f×", editor.zoom))
-                    Slider(value: control(
-                        { editor.zoom }, { editor.changeZoom($0) }
-                    ), in: 1...2.5)
-                    Text(String(format: "Orizzontale %.0f%%", editor.focusX * 100))
-                        .font(.caption)
-                    Slider(value: control(
-                        { editor.focusX }, { editor.changeFocus(x: $0) }
-                    ), in: 0...1)
-                    Text(String(format: "Verticale %.0f%%", editor.focusY * 100))
-                        .font(.caption)
-                    Slider(value: control(
-                        { editor.focusY }, { editor.changeFocus(y: $0) }
-                    ), in: 0...1)
-                    HStack {
-                        Button("Rimuovi keyframe") { editor.removeNearestKeyframe() }
-                        Button("Reset camera") { editor.resetCamera() }
-                    }
-                    .font(.caption)
-                    Divider()
-                    Text("Composizione").font(.headline)
-                    Picker("Sfondo", selection: Binding(
-                        get: { editor.style },
-                        set: { editor.style = $0; editor.updateStyle() }
-                    )) {
-                        ForEach(["Dark", "Black", "Light", "Cineo Ocean", "Cineo Frost"], id: \.self) { name in
-                            Text(name).tag(name)
-                        }
-                    }
-                    Text("Cineo Ocean e Frost riprendono la palette ufficiale del brand kit.")
-                        .font(.caption2).foregroundStyle(.secondary)
-                    Picker("Movimento camera", selection: Binding(
-                        get: { editor.motionPreset },
-                        set: { editor.motionPreset = $0; editor.updateStyle() }
-                    )) {
-                        ForEach(CineoSceneMotionPreset.allCases, id: \.self) { preset in
-                            Text(preset == .classic ? "Classico" :
-                                 preset == .focused ? "Dinamico" : "Cinematico").tag(preset)
-                        }
-                    }
-                    .disabled(editor.sourceURL == nil || editor.isExporting)
-                    .help("Profilo della camera: l'anteprima e l'export condividono la stessa curva.")
-                    HStack(spacing: 8) {
-                        Button("Segui cursore negli zoom") { editor.applyCursorFollow() }
-                            .disabled(!editor.hasPointerMovement || editor.isExporting ||
-                                      editor.autoEditPreviewEnabled)
-                        Button("Annulla follow") { editor.undoCursorFollow() }
-                            .disabled(!editor.canUndoCursorFollow || editor.isExporting)
-                    }
-                    .font(.caption)
-                    Text("Camera Follow interviene solo quando il cursore esce dalla zona sicura, senza sovrascrivere i tuoi zoom.")
-                        .font(.caption2).foregroundStyle(.secondary)
-                    Toggle("Evidenzia click", isOn: Binding(
-                        get: { editor.showClickHighlights },
-                        set: { editor.setClickHighlights($0) }
-                    ))
-                    .disabled(editor.sourceURL == nil || editor.isExporting ||
-                              (!editor.hasPointerEvents && !editor.showClickHighlights))
-                    .help("Anelli leggeri sui click. Non aggiunge un secondo cursore.")
-                    Toggle("Formato verticale 9:16", isOn: Binding(
-                        get: { editor.portrait },
-                        set: { editor.portrait = $0; editor.updateStyle() }
-                    ))
-                    Text(String(format: "Margini %.0f%%", editor.padding * 100))
-                    Slider(value: control(
-                        { editor.padding },
-                        { editor.padding = $0; editor.updateStyle() }
-                    ), in: 0...0.25)
-                    Divider()
-                    Text("Analisi video importato").font(.headline)
-                    Button(editor.isChoosingImportedCursor
-                           ? "Seleziona il cursore nell'anteprima…"
-                           : "Analizza cursore nel video") {
-                        editor.requestImportedCursorSelection()
-                    }
-                    .disabled(editor.sourceURL == nil || editor.isExporting ||
-                              editor.isAnalyzingImportedVideo)
-                    if editor.isChoosingImportedCursor {
-                        Text("Metti in pausa il video su un frame nitido e clicca sulla punta del cursore nell'anteprima.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    if editor.isAnalyzingImportedVideo {
-                        ProgressView(value: editor.importedAnalysisProgress)
-                        HStack {
-                            Text("\(Int(editor.importedAnalysisProgress * 100))% · analisi locale")
-                            Spacer()
-                            Button("Annulla") { editor.cancelImportedVideoAnalysis() }
-                        }
-                        .font(.caption2)
-                    }
-                    if let report = editor.importedAnalysis {
-                        Text("Tracciamento: \(report.samples.count) posizioni stimate. Nessun click dedotto; il cursore originale del video resta visibile.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Divider()
-                    Text("Smart Camera · Auto Edit").font(.headline)
-                    Picker("Intensità", selection: $editor.autoEditPreset) {
-                        ForEach(CameraPreset.allCases, id: \.self) { preset in
-                            Text(preset.displayName).tag(preset)
-                        }
-                    }
-                    Button(editor.hasPointerEvents
-                           ? "Genera proposte dai click"
-                           : "Genera zoom da soste del cursore") {
-                        editor.proposeAutoEdit()
-                    }
-                    .disabled((!editor.hasPointerEvents && !editor.hasImportedVideoMotion) ||
-                              editor.isExporting || editor.isAnalyzingImportedVideo)
-                    if editor.autoEditPreviewEnabled {
-                        Text("\(editor.autoEditSelectedCount) su \(editor.autoEditShotCount) proposte attive. Nessuna modifica salvata.")
-                            .font(.caption).foregroundStyle(.secondary)
+                    HStack(alignment: .top, spacing: 0) {
                         ScrollView {
-                            VStack(alignment: .leading, spacing: 7) {
-                                ForEach(editor.autoEditShots.indices, id: \.self) { index in
-                                    let shot = editor.autoEditShots[index]
-                                    HStack(spacing: 5) {
-                                        Toggle(isOn: Binding(
-                                            get: { editor.isAutoEditShotSelected(index) },
-                                            set: { editor.setAutoEditShot(index, selected: $0) }
-                                        )) {
-                                            Text(String(format: "Zoom %d · %.1f×", index + 1, shot.zoom))
-                                        }
-                                        .toggleStyle(.checkbox)
-                                        .font(.caption)
-                                        Button("Vai") {
-                                            editor.scrub(min(editor.duration - 0.05,
-                                                              shot.start + min(0.35, (shot.end-shot.start) * 0.25)))
-                                        }
-                                        .buttonStyle(.borderless)
-                                        .font(.caption2)
-                                        .help(String(format: "%.1f–%.1f s · %@", shot.start,
-                                                     shot.end, shot.reason.rawValue))
-                                    }
-                                }
-                            }
+                            workspace(availableWidth: max(1, geometry.size.width - 360))
+                                .padding(18)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(maxHeight: 150)
-                        HStack {
-                            Button("Applica zoom") { editor.applyAutoEditProposal() }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(editor.autoEditSelectedCount == 0)
-                            Button("Annulla") { editor.discardAutoEditProposal() }
-                        }
-                    } else if !editor.hasPointerEvents && !editor.hasImportedVideoMotion {
-                        Text("Nessun click o movimento disponibile. Per video importati usa «Analizza cursore nel video»; per video Cineo abilita la telemetria.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    if editor.mode == .assisted {
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         Divider()
-                        Text("Assistito").font(.headline)
-                        Text("Seleziona un punto nell'anteprima e crea uno zoom manualmente. I suggerimenti automatici si trovano in Smart Camera.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button("Suggerisci zoom qui") { editor.applySuggestedZoom() }
+                        inspectorPanel(scrollable: true)
+                            .frame(width: 304)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 14)
                     }
-                    Spacer(minLength: 0)
-                    Text("\(editor.keyframes.count) keyframe salvati")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
-                .frame(width: 245, alignment: .leading)
-            }
-            Divider()
-            HStack {
-                Text(editor.status)
-                    .font(.caption)
-                    .textSelection(.enabled)
-                    .lineLimit(2)
-                Spacer()
-                if editor.isExporting {
-                    Button("Annulla export") { editor.cancelExport() }
-                    ProgressView(value: editor.exportProgress)
-                        .frame(width: 140)
-                    Text("\(Int(editor.exportProgress * 100))%")
-                        .monospacedDigit().font(.caption)
-                }
-                if editor.outputURL != nil {
-                    Button("Mostra MP4") { editor.showExport() }
-                }
-                Button("Esporta MP4") { editor.export() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(editor.isExporting || editor.sourceURL == nil)
+
+                Divider()
+                footer(compact: compact)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
             }
         }
-        .padding(20)
-        .frame(minWidth: 1040, minHeight: 580)
+        // Studio now remains usable in a much smaller window than the
+        // previous fixed 1040px layout; it switches to stacked mode.
+        .frame(minWidth: 720, minHeight: 560)
         .tint(CineoBrand.ocean)
         .onReceive(Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()) { _ in
             editor.renderPlaybackTick()
@@ -2529,6 +2214,533 @@ struct CineoManualEditorView: View {
             set: { editor.showingInstructions = $0 }
         )) {
             CineoInstructionsDialog(editor: editor)
+        }
+    }
+
+    private func header(compact: Bool) -> some View {
+        HStack(spacing: 12) {
+            Button { onClose() } label: {
+                Label("Registrazione", systemImage: "chevron.left")
+                    .labelStyle(compact ? .iconOnly : .titleAndIcon)
+            }
+            .help("Torna alla registrazione")
+            .disabled(editor.isExporting || editor.isSavingProject)
+
+            CineoBrandSymbol(size: compact ? 26 : 31)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Cineo Studio")
+                    .font(CineoBrand.displayFont(size: compact ? 18 : 21))
+                Text(editor.title.isEmpty ? "Nessun video aperto" : editor.title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if !compact {
+                Picker("Modalità", selection: $editor.mode) {
+                    ForEach(CineoEditorModel.Mode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 174)
+            }
+
+            CineoMusicQueueButton(editor: editor)
+            Menu {
+                if compact {
+                    Picker("Modalità", selection: $editor.mode) {
+                        ForEach(CineoEditorModel.Mode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    Divider()
+                }
+                if editor.projectURL == nil {
+                    Button("Salva progetto Cineo…") { editor.saveAsProject() }
+                        .disabled(editor.isSavingProject || editor.isExporting)
+                }
+                Button("Musica…") { editor.showingMusic = true }
+                    .disabled(editor.sourceURL == nil)
+                Button("Importa istruzioni…") { importInstructions() }
+                    .disabled(editor.isExporting || editor.isSavingProject || editor.sourceURL == nil)
+                Button("Guida e JSON del montaggio…") { editor.showingInstructions = true }
+                    .disabled(editor.sourceURL == nil)
+            } label: {
+                Label("Strumenti", systemImage: "ellipsis.circle")
+            }
+            .help("Progetto, musica, istruzioni e impostazioni")
+            if editor.isSavingProject { ProgressView().controlSize(.small) }
+        }
+    }
+
+    private func importInstructions() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.json]
+        panel.message = "Seleziona un file Cineo Actions JSON v1"
+        if panel.runModal() == .OK, let url = panel.url {
+            editor.importInstructions(from: url)
+        }
+    }
+
+    private func workspace(availableWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Anteprima", systemImage: "play.rectangle")
+                    .font(.headline)
+                Spacer()
+                Text(editor.portrait ? "9:16" : "16:9")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                if editor.isChoosingImportedCursor {
+                    Label("Seleziona la punta del cursore", systemImage: "cursorarrow.click")
+                        .font(.caption)
+                        .foregroundStyle(CineoBrand.ocean)
+                }
+            }
+            stage(availableWidth: availableWidth)
+            playbackControls
+            if editor.isPreviewPlaying {
+                Text("Anteprima \(editor.previewActualFPS) fps · qualità proxy")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Divider()
+            HStack {
+                Label("Timeline", systemImage: "timeline.selection")
+                    .font(.headline)
+                Spacer()
+                Text("\(editor.keyframes.count) keyframe")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            CineoNativeTimelineView(editor: editor)
+            CineoMusicTimelineStrip(editor: editor)
+
+            DisclosureGroup("Tagli video", isExpanded: $cutsExpanded) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("I tagli non distruttivi vanno effettuati prima degli zoom e della musica.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Button("Inizio") { editor.cutMarkIn = editor.selectedTime }
+                        Text(String(format: "%.1f s", editor.cutMarkIn))
+                            .font(.caption.monospacedDigit())
+                        Button("Fine") { editor.cutMarkOut = editor.selectedTime }
+                        Text(String(format: "%.1f s", editor.cutMarkOut))
+                            .font(.caption.monospacedDigit())
+                        Spacer(minLength: 0)
+                    }
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            cutActionButtons
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            cutActionButtons
+                        }
+                    }
+                }
+                .padding(.top, 8)
+            }
+            .font(.callout)
+
+            if !editor.importedActionMarkers.isEmpty || !editor.keyframes.isEmpty {
+                DisclosureGroup("Dettagli azioni e keyframe", isExpanded: $detailsExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !editor.importedActionMarkers.isEmpty {
+                            ScrollView(.horizontal) {
+                                HStack(spacing: 6) {
+                                    ForEach(editor.importedActionMarkers) { action in
+                                        Button(action.id) { editor.scrub(action.at) }
+                                            .buttonStyle(.bordered)
+                                            .font(.caption)
+                                            .help(String(format: "Vai al focus a %.2f s", action.at))
+                                    }
+                                }
+                            }
+                        }
+                        if !editor.keyframes.isEmpty {
+                            ScrollView(.horizontal) {
+                                HStack(spacing: 6) {
+                                    ForEach(editor.keyframes, id: \.time) { key in
+                                        Button(String(format: "%.1fs · %.1f×", key.time, key.zoom)) {
+                                            editor.scrub(key.time)
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .font(.caption)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.top, 8)
+                }
+                .font(.callout)
+            }
+            Text("Sposta la testina sulla timeline e clicca nell'anteprima per scegliere il punto d'interesse.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var cutActionButtons: some View {
+        Group {
+            Button("Rimuovi intervallo") { editor.removeMarkedInterval() }
+                .disabled(editor.sourceURL == nil || editor.isExporting ||
+                          !editor.keyframes.isEmpty || editor.musicAsset != nil ||
+                          editor.cutMarkOut <= editor.cutMarkIn)
+            Button("Annulla taglio") { editor.undoCut() }
+            Button("Ripristina taglio") { editor.redoCut() }
+        }
+        .font(.caption)
+    }
+
+    private func stage(availableWidth: CGFloat) -> some View {
+        let aspect = CGFloat(max(1, editor.outputWidth)) / CGFloat(max(1, editor.outputHeight))
+        let height = min(CGFloat(510), max(CGFloat(220), availableWidth / aspect))
+        return GeometryReader { geometry in
+            let w = min(geometry.size.width, geometry.size.height * aspect)
+            let h = w / aspect
+            ZStack {
+                if let image = editor.preview {
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: w, height: h)
+                        .contentShape(Rectangle())
+                        .onTapGesture { location in
+                            guard w > 0 && h > 0 else { return }
+                            let x = min(1, max(0, Double(location.x / w)))
+                            let y = min(1, max(0, Double(location.y / h)))
+                            if editor.isChoosingImportedCursor {
+                                editor.trackImportedCursor(atCanvasX: x, y: y)
+                            } else {
+                                editor.choosePoint(x: x, y: y)
+                            }
+                        }
+                        .accessibilityLabel("Anteprima video interattiva")
+                        .accessibilityHint("Clicca per scegliere il punto d'interesse o la punta del cursore")
+                } else {
+                    ProgressView("Preparazione anteprima…")
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .topLeading) {
+                if editor.isChoosingImportedCursor {
+                    Label("Clicca sulla punta del cursore", systemImage: "cursorarrow")
+                        .font(.caption.weight(.medium))
+                        .padding(8)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(12)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+        .frame(height: height)
+        .background(Color.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12)
+            .strokeBorder(.primary.opacity(0.08), lineWidth: 1))
+    }
+
+    private var playbackControls: some View {
+        HStack(spacing: 9) {
+            Button { editor.stepPreview(frames: -1) } label: {
+                Image(systemName: "backward.frame.fill")
+            }
+            .accessibilityLabel("Fotogramma precedente")
+            .disabled(editor.sourceURL == nil)
+            Button { editor.togglePreviewPlayback() } label: {
+                Label(editor.isPreviewPlaying ? "Pausa" : "Play",
+                      systemImage: editor.isPreviewPlaying ? "pause.fill" : "play.fill")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.space, modifiers: [])
+            .help("Riproduci l'anteprima")
+            .disabled(editor.sourceURL == nil || editor.isExporting)
+            Text(String(format: "%02d:%05.2f",
+                        Int(editor.selectedTime) / 60,
+                        editor.selectedTime.truncatingRemainder(dividingBy: 60)))
+                .font(.caption.monospacedDigit())
+                .frame(minWidth: 72)
+                .accessibilityLabel("Posizione nella timeline")
+            Slider(value: control({ editor.selectedTime }, { editor.scrub($0) }),
+                   in: 0...max(0.1, editor.duration - 0.05))
+                .accessibilityLabel("Spostamento nella timeline")
+            Text(String(format: "%.1f s", editor.duration))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Button { editor.stepPreview(frames: 1) } label: {
+                Image(systemName: "forward.frame.fill")
+            }
+            .accessibilityLabel("Fotogramma successivo")
+            .disabled(editor.sourceURL == nil)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    @ViewBuilder
+    private func inspectorPanel(scrollable: Bool) -> some View {
+        if scrollable {
+            VStack(alignment: .leading, spacing: 12) {
+                inspectorTabs
+                ScrollView {
+                    inspectorContent
+                        .padding(.bottom, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                inspectorTabs
+                inspectorContent
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var inspectorTabs: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Strumenti di modifica")
+                .font(.headline)
+            Picker("Strumenti di modifica", selection: $inspectorSection) {
+                ForEach(InspectorSection.allCases, id: \.self) { section in
+                    Text(section.rawValue).tag(section)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+    }
+
+    @ViewBuilder
+    private var inspectorContent: some View {
+        switch inspectorSection {
+        case .smart: smartInspector
+        case .camera: cameraInspector
+        case .appearance: appearanceInspector
+        }
+    }
+
+    private var smartInspector: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Smart Camera", systemImage: "sparkles.rectangle.stack")
+                .font(.headline)
+            Text("Trova i punti d'interesse e approva solo gli zoom utili.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if !editor.hasPointerEvents {
+                Button(editor.isChoosingImportedCursor
+                       ? "Seleziona nell'anteprima…"
+                       : "Analizza cursore nel video") {
+                    editor.requestImportedCursorSelection()
+                }
+                .disabled(editor.sourceURL == nil || editor.isExporting ||
+                          editor.isAnalyzingImportedVideo)
+                if editor.isChoosingImportedCursor {
+                    Text("Metti in pausa su un frame nitido e clicca sulla punta del cursore.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if editor.isAnalyzingImportedVideo {
+                ProgressView(value: editor.importedAnalysisProgress)
+                    .accessibilityLabel("Analisi del cursore")
+                HStack {
+                    Text("\(Int(editor.importedAnalysisProgress * 100))% · analisi locale")
+                        .font(.caption.monospacedDigit())
+                    Spacer()
+                    Button("Annulla") { editor.cancelImportedVideoAnalysis() }
+                }
+            }
+            if let report = editor.importedAnalysis {
+                Label("\(report.samples.count) posizioni stimate", systemImage: "checkmark.circle")
+                    .font(.caption)
+                Text("Nessun click ricostruito; il cursore originale rimane nel video.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Divider()
+            Picker("Intensità", selection: $editor.autoEditPreset) {
+                ForEach(CameraPreset.allCases, id: \.self) { preset in
+                    Text(preset.displayName).tag(preset)
+                }
+            }
+            Button(editor.hasPointerEvents
+                   ? "Genera proposte dai click"
+                   : "Genera zoom dalle soste") {
+                editor.proposeAutoEdit()
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled((!editor.hasPointerEvents && !editor.hasImportedVideoMotion) ||
+                      editor.isExporting || editor.isAnalyzingImportedVideo)
+            if editor.autoEditPreviewEnabled {
+                Text("\(editor.autoEditSelectedCount) di \(editor.autoEditShotCount) zoom selezionati · non ancora applicati")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(editor.autoEditShots.indices, id: \.self) { index in
+                            let shot = editor.autoEditShots[index]
+                            HStack {
+                                Toggle(isOn: Binding(
+                                    get: { editor.isAutoEditShotSelected(index) },
+                                    set: { editor.setAutoEditShot(index, selected: $0) }
+                                )) {
+                                    Text(String(format: "Zoom %d · %.1f×", index + 1, shot.zoom))
+                                        .font(.caption)
+                                }
+                                .toggleStyle(.checkbox)
+                                Button("Vai") {
+                                    editor.scrub(min(editor.duration - 0.05,
+                                                      shot.start + min(0.35, (shot.end-shot.start) * 0.25)))
+                                }
+                                .font(.caption)
+                                .buttonStyle(.borderless)
+                                .help(String(format: "%.1f–%.1f s · %@", shot.start,
+                                                    shot.end, shot.reason.rawValue))
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 180)
+                HStack {
+                    Button("Applica zoom") { editor.applyAutoEditProposal() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(editor.autoEditSelectedCount == 0)
+                    Button("Scarta") { editor.discardAutoEditProposal() }
+                }
+            } else if !editor.hasPointerEvents && !editor.hasImportedVideoMotion {
+                Text("Per un MP4 importato, analizza prima il cursore. Per le registrazioni Cineo puoi usare gli eventi acquisiti.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if editor.mode == .assisted {
+                Divider()
+                Button("Suggerisci zoom in questo punto") { editor.applySuggestedZoom() }
+                    .disabled(editor.sourceURL == nil || editor.isExporting)
+                    .help("Usa il punto selezionato nell'anteprima")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var cameraInspector: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Inquadratura", systemImage: "viewfinder")
+                .font(.headline)
+            Text(String(format: "Zoom %.2f×", editor.zoom))
+                .font(.callout.weight(.medium))
+            Slider(value: control({ editor.zoom }, { editor.changeZoom($0) }), in: 1...2.5)
+                .accessibilityLabel("Zoom")
+            Text(String(format: "Posizione orizzontale %.0f%%", editor.focusX * 100))
+                .font(.caption)
+            Slider(value: control({ editor.focusX }, { editor.changeFocus(x: $0) }), in: 0...1)
+                .accessibilityLabel("Posizione orizzontale")
+            Text(String(format: "Posizione verticale %.0f%%", editor.focusY * 100))
+                .font(.caption)
+            Slider(value: control({ editor.focusY }, { editor.changeFocus(y: $0) }), in: 0...1)
+                .accessibilityLabel("Posizione verticale")
+            HStack {
+                Button("Rimuovi keyframe") { editor.removeNearestKeyframe() }
+                Button("Reset camera") { editor.resetCamera() }
+            }
+            .font(.caption)
+            Divider()
+            Button("Segui cursore negli zoom") { editor.applyCursorFollow() }
+                .disabled(!editor.hasPointerMovement || editor.isExporting ||
+                          editor.autoEditPreviewEnabled)
+            Button("Annulla follow") { editor.undoCursorFollow() }
+                .disabled(!editor.canUndoCursorFollow || editor.isExporting)
+            Text("Il movimento segue il cursore fuori dalla zona sicura senza sovrascrivere i keyframe manuali.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("\(editor.keyframes.count) keyframe salvati")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var appearanceInspector: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Composizione", systemImage: "rectangle.on.rectangle")
+                .font(.headline)
+            Picker("Sfondo", selection: Binding(
+                get: { editor.style },
+                set: { editor.style = $0; editor.updateStyle() }
+            )) {
+                ForEach(["Dark", "Black", "Light", "Cineo Ocean", "Cineo Frost"], id: \.self) { name in
+                    Text(name).tag(name)
+                }
+            }
+            Picker("Movimento camera", selection: Binding(
+                get: { editor.motionPreset },
+                set: { editor.motionPreset = $0; editor.updateStyle() }
+            )) {
+                ForEach(CineoSceneMotionPreset.allCases, id: \.self) { preset in
+                    Text(preset == .classic ? "Classico" :
+                         preset == .focused ? "Dinamico" : "Cinematico").tag(preset)
+                }
+            }
+            .disabled(editor.sourceURL == nil || editor.isExporting)
+            Toggle("Evidenzia click", isOn: Binding(
+                get: { editor.showClickHighlights },
+                set: { editor.setClickHighlights($0) }
+            ))
+            .disabled(editor.sourceURL == nil || editor.isExporting ||
+                      (!editor.hasPointerEvents && !editor.showClickHighlights))
+            Toggle("Formato verticale 9:16", isOn: Binding(
+                get: { editor.portrait },
+                set: { editor.portrait = $0; editor.updateStyle() }
+            ))
+            Text(String(format: "Margini %.0f%%", editor.padding * 100))
+                .font(.caption)
+            Slider(value: control(
+                { editor.padding },
+                { editor.padding = $0; editor.updateStyle() }
+            ), in: 0...0.25)
+                .accessibilityLabel("Margini composizione")
+            Text("Le modifiche rimangono reversibili e usano lo stesso rendering in anteprima ed export.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func footer(compact: Bool) -> some View {
+        HStack(spacing: 12) {
+            Text(editor.status)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .lineLimit(compact ? 1 : 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(editor.status)
+            if editor.isExporting {
+                ProgressView(value: editor.exportProgress)
+                    .frame(width: compact ? 70 : 120)
+                    .accessibilityLabel("Esportazione MP4")
+                Text("\(Int(editor.exportProgress * 100))%")
+                    .font(.caption.monospacedDigit())
+                Button("Annulla") { editor.cancelExport() }
+            }
+            if editor.outputURL != nil {
+                Button("Mostra MP4") { editor.showExport() }
+            }
+            Button("Esporta MP4") { editor.export() }
+                .buttonStyle(.borderedProminent)
+                .disabled(editor.isExporting || editor.sourceURL == nil)
         }
     }
 }
