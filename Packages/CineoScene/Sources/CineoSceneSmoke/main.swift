@@ -6,6 +6,7 @@ import CineoEvents
 #if canImport(AVFoundation) && canImport(CoreImage)
 import AVFoundation
 import CoreImage
+import CoreGraphics
 import CoreVideo
 import CryptoKit
 
