@@ -3,6 +3,7 @@ import AVFoundation
 import CoreVideo
 import CryptoKit
 import CineoVideoAnalysis
+import CineoDirector
 
 /// Exploratory synthetic quality measurement. Non-gating until evaluated
 /// against a diverse set of real, user-consented screen recordings.
