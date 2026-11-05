@@ -105,7 +105,7 @@ public actor CineoVideoCursorTracker {
                 nextTime += step
                 continue
             }
-            guard let observation = tracker.results?.first else {
+            guard let observation = tracker.results?.first as? VNDetectedObjectObservation else {
                 failures += 1
                 if failures >= 4 { break }
                 nextTime += step
