@@ -31,6 +31,8 @@ jobs:
       - name: Verify local cache persistence, fingerprint invalidation and safe seed
         run: swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-video-smoke
       - name: Gate synthetic H264 cursor precision and coverage
+        env:
+          CINEO_CURSOR_TRACE: "1"
         run: |
           set -euo pipefail
           swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-cursor-benchmark | tee cursor-benchmark.log
