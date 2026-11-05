@@ -181,10 +181,13 @@ private struct CaptureDashboard: View {
                 Toggle("Audio sistema", isOn: $recorder.captureSystemAudio)
                 Toggle("Microfono", isOn: $recorder.captureMicrophone)
                 Toggle("Registra click (Auto Edit)", isOn: $recorder.captureClickEvents)
+                Toggle("Movimento cursore", isOn: $recorder.capturePointerMovement)
+                Toggle("Cursore ricostruito (beta)", isOn: $recorder.captureIndependentCursor)
+                    .help("Nasconde il cursore nella registrazione e lo ricrea nel compositor. Richiede telemetria e test su Mac.")
             }
             .toggleStyle(.checkbox)
             .disabled(recorder.phase == .recording || recorder.phase.isWorking)
-            Text("Le opzioni sono disattivate per impostazione predefinita. La telemetria salva solo coordinate e tempi dei click, mai testo digitato.")
+            Text("Opzioni disattivate per default. Cursore ricostruito nasconde il puntatore nel video originale e salva movimento/tempi in un sidecar locale; mai testo o tasti. Usa questa modalità solo dopo un test Mac.")
                 .font(.caption2).foregroundStyle(.secondary)
             HStack(spacing: 12) {
                 if recorder.phase == .recording {
@@ -356,11 +359,14 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
     @Published private(set) var lastCompletedVideo: URL?
     @Published private(set) var logs: [CaptureLogEntry] = []
     @Published var captureClickEvents = false
+    @Published var capturePointerMovement = false
+    @Published var captureIndependentCursor = false
     @Published var captureSystemAudio = false
     @Published var captureMicrophone = false
 
     private var firstFrameObserver: CineoFirstFrameObserver?
     private var pointerMonitor: Any?
+    private var pointerSamplingTask: Task<Void, Never>?
     private var capturedClicks: [CineoPointerRawClick] = []
     private var selectedDisplayFrame: CGRect?
 
@@ -429,6 +435,8 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
     }
 
     private func stopPointerMonitor() {
+        pointerSamplingTask?.cancel()
+        pointerSamplingTask = nil
         if let pointerMonitor { NSEvent.removeMonitor(pointerMonitor) }
         pointerMonitor = nil
     }
@@ -437,15 +445,37 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
         stopPointerMonitor()
         capturedClicks = []
         selectedDisplayFrame = frame
-        guard captureClickEvents else { return }
-        pointerMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+        guard captureClickEvents || capturePointerMovement else { return }
+        if capturePointerMovement || captureIndependentCursor {
+            // Sample only mouse location. This does not observe keyboard input or AX content.
+            // The same monotonic clock anchors both pointer samples and clicks to first video PTS.
+            pointerSamplingTask = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    guard let self, self.phase == .recording,
+                          let currentFrame = self.selectedDisplayFrame else { return }
+                    if self.capturedClicks.count < 180_000 {
+                        let point = NSEvent.mouseLocation
+                        let x = (point.x - currentFrame.minX) / currentFrame.width
+                        let y = (currentFrame.maxY - point.y) / currentFrame.height
+                        if x.isFinite, y.isFinite, (0...1).contains(x), (0...1).contains(y) {
+                            self.capturedClicks.append(.init(
+                                hostSeconds: ProcessInfo.processInfo.systemUptime,
+                                x: x, y: y, kind: .moved))
+                        }
+                    }
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+            }
+        }
+        if captureClickEvents {
+            pointerMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             let timestamp = event.timestamp
             let isRight = event.type == .rightMouseDown
             let pt = NSEvent.mouseLocation
             Task { @MainActor [weak self] in
                 guard let self, self.phase == .recording,
-                      self.capturedClicks.count < 20_000,
+                      self.capturedClicks.count < 180_000,
                       let frame = self.selectedDisplayFrame else { return }
                 let x = (pt.x - frame.minX) / frame.width
                 let y = (frame.maxY - pt.y) / frame.height
@@ -456,9 +486,10 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
                     hostSeconds: timestamp, x: x, y: y, kind: kind))
             }
         }
-        if pointerMonitor == nil {
-            log("Monitoraggio click non disponibile: il video verrà registrato senza telemetria.",
-                level: .warning)
+            if pointerMonitor == nil {
+                log("Monitoraggio click non disponibile. Eventuale percorso cursore campionato separatamente.",
+                    level: .warning)
+            }
         }
     }
 
@@ -505,7 +536,7 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
             let url = recordingsDirectory.appendingPathComponent(String(name))
             targetURL = url
             currentFilename = url.lastPathComponent
-            log("Output reserved in Movies/Cineo. H.264, 30 fps; system audio=\(captureSystemAudio), mic=\(captureMicrophone), clicks=\(captureClickEvents).")
+            log("Output reserved in Movies/Cineo. H.264, 30 fps; system audio=\(captureSystemAudio), mic=\(captureMicrophone), clicks=\(captureClickEvents), movement=\(capturePointerMovement), independentCursor=\(captureIndependentCursor).")
 
             let config = SCStreamConfiguration()
             config.width = display.width
@@ -513,7 +544,7 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
             config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
             config.queueDepth = 5
             config.pixelFormat = kCVPixelFormatType_32BGRA
-            config.showsCursor = true
+            config.showsCursor = !captureIndependentCursor
             config.capturesAudio = captureSystemAudio
             config.captureMicrophone = captureMicrophone
             config.excludesCurrentProcessAudio = true
@@ -529,7 +560,7 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
             )
             let activeOutput = SCRecordingOutput(configuration: recordConfig, delegate: self)
             try activeStream.addRecordingOutput(activeOutput)
-            if captureClickEvents {
+            if captureClickEvents || capturePointerMovement || captureIndependentCursor {
                 let anchor = CineoFirstFrameObserver()
                 do {
                     try activeStream.addStreamOutput(
@@ -541,6 +572,17 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
                         level: .warning)
                 }
             }
+            // Independent cursor requires source-clock anchor and a usable
+            // captured display frame BEFORE hiding the cursor in the MP4.
+            if captureIndependentCursor {
+                guard firstFrameObserver != nil,
+                      NSScreen.screens.contains(where: {
+                          ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
+                              .uint32Value == display.displayID
+                      }) else {
+                    throw CineoEventsError.invalidClock
+                }
+            }
             // Retain objects before starting, including during asynchronous
             // delegate callbacks or an early stream failure.
             stream = activeStream
@@ -550,7 +592,7 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
             if phase == .preparing {
                 phase = .recording
                 status = "Registrazione attiva. Premi Stop per terminare."
-                if captureClickEvents && firstFrameObserver != nil {
+                if (captureClickEvents || capturePointerMovement || captureIndependentCursor) && firstFrameObserver != nil {
                     // Global NSEvent uses host uptime and never captures typed text.
                     let screen = NSScreen.screens.first {
                         ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
@@ -622,7 +664,10 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
                 fail("MP4 was written but no playable video track was found.")
                 return
             }
-            if captureClickEvents {
+            // The raw recording is retained even when the independent cursor
+            // metadata cannot be finalized. Surface that failure prominently.
+            var independentCursorReady = !captureIndependentCursor
+            if captureClickEvents || capturePointerMovement || captureIndependentCursor {
                 do {
                     if let stamp = firstFrameObserver?.firstFrameHostSeconds {
                         let clock = try CineoCaptureClock(
@@ -635,9 +680,12 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
                         if events.isEmpty && !capturedClicks.isEmpty {
                             log("Timestamp click non allineati al video: nessun sidecar scritto.", level: .warning)
                         } else {
-                            let sidecar = try CineoPointerSidecar(events: events)
+                            let sidecar = try CineoPointerSidecar(
+                                events: events,
+                                cursorMode: captureIndependentCursor ? .independentOverlay : .embedded)
                             try CineoPointerRecordingStore().save(sidecar, for: url)
-                            log("Telemetria click salvata: \(events.count) eventi in JSON locale.")
+                            independentCursorReady = true
+                            log("Telemetria puntatore salvata: \(events.count) eventi (click/movimento) in JSON locale.")
                         }
                     } else {
                         log("Primo frame non disponibile: nessuna telemetria salvata (video integro).", level: .warning)
@@ -661,7 +709,12 @@ final class CineoScreenRecorder: NSObject, ObservableObject, SCRecordingOutputDe
             capturedClicks = []
             finalizationStarted = nil
             phase = .complete
-            status = "MP4 verified and ready. Choose Open MP4 or Show recordings."
+            status = independentCursorReady
+                ? "MP4 verificato e pronto. Apri il video o l'editor."
+                : "MP4 salvato, ma cursore ricostruito NON disponibile: metadati mancanti. Ripeti la cattura in modalità cursore standard."
+            if !independentCursorReady {
+                log("ATTENZIONE: MP4 senza cursore incorporato, sidecar v2 non valido o assente. Non esportare come video finale.", level: .error)
+            }
             log("Verified MP4: video track present, \(Int(duration)) seconds, \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)).")
             monitorTask?.cancel()
             monitorTask = nil
