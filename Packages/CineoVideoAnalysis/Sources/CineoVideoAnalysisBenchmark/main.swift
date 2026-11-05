@@ -67,7 +67,8 @@ struct CineoImportedCursorBenchmark {
             let coverage = Double(known.count) / 12.0
             print(String(format: "CURSOR_BENCHMARK samples=%d confident=%d meanErrorPx=%.2f maxErrorPx=%.2f coverage=%.2f lastTracked=%.2f",
                          known.count, highQuality, avg, known.max() ?? 0, coverage, lastTracked))
-            guard known.count >= 9, highQuality >= 8,
+            guard known.count >= 11, highQuality >= 11,
+                  lastTracked >= sourceSeconds - 0.2,
                   avg <= 8, (known.max() ?? .infinity) <= 16 else {
                 throw BenchmarkError.qualityFailed
             }
