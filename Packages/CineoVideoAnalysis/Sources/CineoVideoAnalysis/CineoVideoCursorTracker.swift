@@ -69,6 +69,19 @@ public actor CineoVideoCursorTracker {
         let tracker = VNTrackObjectRequest(detectedObjectObservation: initial)
         tracker.trackingLevel = .accurate
         let sequence = VNSequenceRequestHandler()
+        // The first frame contains the user's real seed. Prime the sequence
+        // with that frame BEFORE trying to follow a moving cursor at t + dt.
+        // Otherwise the tracker can be asked to follow without having seen
+        // the initial object in its image context.
+        let firstImage = try generator.copyCGImage(
+            at: CMTime(seconds: seedSourceSeconds, preferredTimescale: 600),
+            actualTime: nil)
+        try Task.checkCancellation()
+        try sequence.perform([tracker], on: firstImage)
+        if let seeded = tracker.results?.first as? VNDetectedObjectObservation,
+           seeded.confidence >= 0.35 {
+            tracker.inputObservation = seeded
+        }
 
         let lastTime = min(expectedSourceDuration - 0.05,
                            seedSourceSeconds + min(600, 6_000 / samplesPerSecond))
