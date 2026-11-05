@@ -2220,8 +2220,13 @@ struct CineoManualEditorView: View {
     private func header(compact: Bool) -> some View {
         HStack(spacing: 12) {
             Button { onClose() } label: {
-                Label("Registrazione", systemImage: "chevron.left")
-                    .labelStyle(compact ? .iconOnly : .titleAndIcon)
+                if compact {
+                    Label("Registrazione", systemImage: "chevron.left")
+                        .labelStyle(.iconOnly)
+                } else {
+                    Label("Registrazione", systemImage: "chevron.left")
+                        .labelStyle(.titleAndIcon)
+                }
             }
             .help("Torna alla registrazione")
             .disabled(editor.isExporting || editor.isSavingProject)
@@ -2312,7 +2317,7 @@ struct CineoManualEditorView: View {
             }
             Divider()
             HStack {
-                Label("Timeline", systemImage: "timeline.selection")
+                Label("Timeline", systemImage: "film.stack")
                     .font(.headline)
                 Spacer()
                 Text("\(editor.keyframes.count) keyframe")
@@ -2447,7 +2452,7 @@ struct CineoManualEditorView: View {
         .background(Color.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 12))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12)
-            .strokeBorder(.primary.opacity(0.08), lineWidth: 1))
+            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
     }
 
     private var playbackControls: some View {
@@ -2534,7 +2539,7 @@ struct CineoManualEditorView: View {
 
     private var smartInspector: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Smart Camera", systemImage: "sparkles.rectangle.stack")
+            Label("Smart Camera", systemImage: "sparkles")
                 .font(.headline)
             Text("Trova i punti d'interesse e approva solo gli zoom utili.")
                 .font(.caption)
