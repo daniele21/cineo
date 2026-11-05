@@ -93,9 +93,16 @@ struct CineoCursorTemplateMatcher {
                 }
             }
         }
-        scan(radius: 65, stride: 3)
+        // A tiny high-contrast arrow can have a huge photometric error even
+        // when the coarse grid is only 1 pixel off its black outline. Search
+        // the nearby motion window at full pixel resolution first, and expand
+        // ONLY when no plausible local match exists.
+        scan(radius: 24, stride: 1)
+        if best > sampleOffsets.count * 16 * 16 {
+            scan(radius: 65, stride: 2)
+        }
         if best > sampleOffsets.count * 28 * 28 {
-            scan(radius: 145, stride: 5)
+            scan(radius: 145, stride: 4)
         }
         guard best != Int.max else { return nil }
         let coarseX = bestX, coarseY = bestY
