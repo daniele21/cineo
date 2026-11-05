@@ -59,6 +59,16 @@ Do not switch users or overwrite a running install.
 | Keyboard / VoiceOver | Tab to transport, inspector and export | Labels announced for timeline, zoom and export progress |
 | Failure / cancellation | Cancel analyze/export, reopen project | Source hash unchanged, status and recovery still accessible |
 
+## Smart Camera scope regression
+
+- The Smart Camera scope defaults to **Intero video** when Studio opens.
+- **Genera zoom per tutto il video** calls `proposeAutoEdit()`, not the playhead-local `applySuggestedZoom()`. It scans the complete output timeline (honoring any intentional cuts), regardless of selected time or scene.
+- **Punto selezionato** explicitly calls `applySuggestedZoom()` and creates a single local manual zoom around the playhead. It must never be mistaken for the global suggestion command.
+- For imported MP4s, global analysis needs the on-device cursor analysis first; the UI must explain why the global button is disabled.
+- Global candidate review remains reversible. Switching to point mode must not silently apply or discard pending global candidates; switch back to review them.
+- Regression: a 65-second source with click events around 3s, 27s and 55s must produce proposals across all three regions. Run `swift test --package-path Packages/CineoDirector`.
+- On physical Mac test at playhead start, middle, and end; each global run should show the same total candidate set for the same source and settings.
+
 ## Automated checks to run on the branch
 
 On a macOS CLT-only host:
