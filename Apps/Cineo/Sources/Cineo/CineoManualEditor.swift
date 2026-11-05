@@ -913,7 +913,9 @@ final class CineoEditorModel: ObservableObject {
         } else {
             pointerSidecar = try? CineoPointerRecordingStore().load(for: original)
         }
-        hasPointerEvents = !(pointerSidecar?.events.isEmpty ?? true)
+        hasPointerEvents = pointerSidecar?.events.contains(where: {
+            $0.kind == .leftClick || $0.kind == .rightClick
+        }) ?? false
         if let sidecar = pointerSidecar {
             // Schema v1 and embedded-cursor recordings NEVER draw another
             // pointer. Only v2 sidecars captured with a hidden cursor qualify.
