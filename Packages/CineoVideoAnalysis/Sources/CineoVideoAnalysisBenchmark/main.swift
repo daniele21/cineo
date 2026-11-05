@@ -44,6 +44,13 @@ struct CineoImportedCursorBenchmark {
                 return hypot(point.x * 640 - expectedX,
                              point.y * 360 - expectedY)
             }
+            for sample in report.samples.prefix(14) {
+                let frame = min(59, max(0, Int((sample.sourceSeconds * 30).rounded())))
+                let expectedX = 85.0 + 2.7 * Double(frame)
+                print(String(format: "CURSOR_POINT time=%.2f x=%.1f y=%.1f refX=%.1f refY=120.0 confidence=%.2f",
+                             sample.sourceSeconds, sample.x * 640, sample.y * 360,
+                             expectedX, sample.confidence))
+            }
             let avg = known.reduce(0, +) / Double(known.count)
             let highQuality = report.samples.filter { $0.confidence >= 0.65 }.count
             print(String(format: "CURSOR_BENCHMARK samples=%d confident=%d meanErrorPx=%.2f maxErrorPx=%.2f",
