@@ -19,7 +19,7 @@ public struct CineoImportedAnalysisStore: Sendable {
     }
 
     public func load(projectURL: URL) throws -> CineoImportedPointerAnalysis {
-        return try decode(projectFile(projectURL))
+        return try decode(try projectFile(projectURL))
     }
 
     public func save(_ analysis: CineoImportedPointerAnalysis, projectURL: URL) throws {
