@@ -78,6 +78,10 @@ public actor CineoVideoCursorTracker {
             actualTime: nil)
         try Task.checkCancellation()
         try sequence.perform([tracker], on: firstImage)
+        let templateMatcher = CineoCursorTemplateMatcher(
+            seed: firstImage, hotspotX: hotspotX, hotspotY: hotspotY)
+        var latestX = hotspotX
+        var latestY = hotspotY
         if let seeded = tracker.results?.first as? VNDetectedObjectObservation,
            seeded.confidence >= 0.35 {
             tracker.inputObservation = seeded
@@ -110,24 +114,30 @@ public actor CineoVideoCursorTracker {
                 continue
             }
             try Task.checkCancellation()
+            var observation: VNDetectedObjectObservation?
             do {
                 try sequence.perform([tracker], on: image)
+                observation = tracker.results?.first as? VNDetectedObjectObservation
             } catch {
+                // Visual patch matching remains available if Vision rejects a frame.
+            }
+            let patch = templateMatcher?.locate(in: image, aroundX: latestX, y: latestY)
+            let x: Double, y: Double, confidence: Double
+            if let patch, patch.confidence >= 0.65 {
+                x = patch.x
+                y = patch.y
+                confidence = patch.confidence
+            } else if let observation, observation.confidence >= 0.45 {
+                let bounds = observation.boundingBox
+                x = Double(bounds.minX + bounds.width * 0.35)
+                y = Double(1 - bounds.maxY + bounds.height * 0.65)
+                confidence = Double(observation.confidence)
+            } else {
                 failures += 1
                 if failures >= 4 { break }
                 nextTime += step
                 continue
             }
-            guard let observation = tracker.results?.first as? VNDetectedObjectObservation else {
-                failures += 1
-                if failures >= 4 { break }
-                nextTime += step
-                continue
-            }
-            let confidence = Double(observation.confidence)
-            let bounds = observation.boundingBox
-            let x = Double(bounds.minX + bounds.width * 0.35)
-            let y = Double(1 - bounds.maxY + bounds.height * 0.65)
             let stamped = CMTimeGetSeconds(actualTime)
             let t = stamped.isFinite && stamped > previousTime ? stamped : nextTime
             if confidence >= 0.45, (0...1).contains(x), (0...1).contains(y),
@@ -135,12 +145,16 @@ public actor CineoVideoCursorTracker {
                 samples.append(.init(sourceSeconds: t, x: x, y: y,
                                      confidence: confidence))
                 previousTime = t
+                latestX = x
+                latestY = y
                 failures = 0
             } else {
                 failures += 1
                 if failures >= 4 { break }
             }
-            tracker.inputObservation = observation
+            if let observation {
+                tracker.inputObservation = observation
+            }
             nextTime += step
             progress?(min(1, (nextTime - seedSourceSeconds) /
                           max(0.01, lastTime - seedSourceSeconds)))
