@@ -42,6 +42,14 @@ struct CineoCursorTemplateMatcher {
                 intensity.append(Int(gray[py * width + px]))
             }
         }
+        // Reject featureless seed regions. A blank patch can match hundreds
+        // of unrelated UI pixels with RMSE=0 and a bogus confidence of 1.
+        let average = Double(intensity.reduce(0, +)) / Double(intensity.count)
+        let variance = intensity.reduce(0.0) { partial, value in
+            let delta = Double(value) - average
+            return partial + delta * delta
+        } / Double(intensity.count)
+        guard variance >= 400 else { return nil }
         sampleOffsets = offsets
         reference = intensity
     }
@@ -123,8 +131,10 @@ struct CineoCursorTemplateMatcher {
                 bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue |
                             CGImageAlphaInfo.premultipliedLast.rawValue)
             else { return false }
-            context.translateBy(x: 0, y: CGFloat(height))
-            context.scaleBy(x: 1, y: -1)
+            // AVAssetImageGenerator's CGImage is already in raster image
+            // coordinates. The pixel buffer's first row corresponds to the
+            // top of the image. Adding a Quartz Y-flip mirrors its content and
+            // makes the user-selected top-left cursor hotspot sample blank UI.
             context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }
