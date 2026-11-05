@@ -1,6 +1,7 @@
 import Foundation
 import CineoScene
 import CineoProject
+import CineoEvents
 
 #if canImport(AVFoundation) && canImport(CoreImage)
 import AVFoundation
@@ -65,7 +66,48 @@ struct SceneSyntheticExportSmoke {
                   SHA256.hash(data: try Data(contentsOf: source)) == before else {
                 throw SmokeError.invalidOutput
             }
-            print("PASS: 2s H.264 source → original and cut outputs, source SHA unchanged, retimed MP4 decoded.")
+            // Independently drawn cursor: use the exact same Core Image
+            // compositor for a frame-level comparison and a real encoded MP4.
+            let pointerSidecar = try CineoPointerSidecar(events: [
+                .init(sourceSeconds: 0.0, x: 0.40, y: 0.45, kind: .moved),
+                .init(sourceSeconds: 0.5, x: 0.45, y: 0.50, kind: .moved),
+                .init(sourceSeconds: 0.7, x: 0.50, y: 0.55, kind: .moved),
+                .init(sourceSeconds: 1.95, x: 0.70, y: 0.55, kind: .moved)
+            ], cursorMode: .independentOverlay)
+            let pointer = try CineoCursorOverlay(sidecar: pointerSidecar)
+            let probe = CIImage(color: CIColor(red: 0.25, green: 0.45, blue: 0.6))
+                .cropped(to: CGRect(x: 0, y: 0, width: 128, height: 80))
+            let baseFrame = try CineoSceneFrameRenderer.compose(
+                probe, at: 0.5, with: plan)
+            let overlayFrame = try CineoSceneFrameRenderer.compose(
+                probe, at: 0.5, with: plan, cursor: pointer,
+                cursorSourceSeconds: 0.5)
+            let context = CIContext(options: [.useSoftwareRenderer: true])
+            let bounds = CGRect(x: 0, y: 0, width: 320, height: 180)
+            func bytes(_ image: CIImage) -> [UInt8] {
+                var data = [UInt8](repeating: 0, count: 320 * 180 * 4)
+                data.withUnsafeMutableBytes { buffer in
+                    if let base = buffer.baseAddress {
+                        context.render(image, toBitmap: base, rowBytes: 320 * 4,
+                                       bounds: bounds, format: .RGBA8,
+                                       colorSpace: CGColorSpaceCreateDeviceRGB())
+                    }
+                }
+                return data
+            }
+            guard bytes(baseFrame) != bytes(overlayFrame) else {
+                throw SmokeError.invalidOutput
+            }
+            let pointerOutput = folder.appendingPathComponent("independent-pointer.mp4")
+            try await CineoSceneExporter().export(
+                source: source, destination: pointerOutput, plan: plan,
+                cursor: pointer)
+            let pointerAsset = AVURLAsset(url: pointerOutput)
+            guard !(try await pointerAsset.loadTracks(withMediaType: .video)).isEmpty,
+                  SHA256.hash(data: try Data(contentsOf: source)) == before else {
+                throw SmokeError.invalidOutput
+            }
+            print("PASS: 2s H.264 styled/cut/cursor outputs, overlay pixels differ only when enabled; source SHA unchanged.")
         } catch {
             FileHandle.standardError.write(Data("FAIL synthetic render smoke: \(error)\n".utf8))
             exit(1)
