@@ -58,6 +58,32 @@ The native smoke checks cache/visual changes without XCTest or the Swift Testing
 
 Annotate at least 5 representative real videos (including cursorless and difficult-pointer recordings). Log candidate start/end, intended target, confidence, source evidence, acceptance decision and final render parity. Report coverage/recall of meaningful moments, precision of proposals, false zooms per minute, cursor drift and end-to-end analysis duration by clip length. Synthetic tests alone do **not** prove semantic relevance or good cinematic motion.
 
+## Synthetic H.264 visual quality gates
+
+The native Mac video benchmark now runs three end-to-end visual scenarios:
+
+| Fixture | Expected behavior | Gate |
+|---|---|---|
+| Localized button change (cursorless) | Detect an actionable visual change, propose an editable zoom and export a rendered MP4 | UI target focus error <=45 source pixels at 640x360; output duration and original-source SHA preserved |
+| Static interface (cursorless) | No inferred action | Zero visual candidates and zero automatic zooms |
+| Late UI update (cursorless) | Preserve full-video coverage | At least one visual candidate after 4.3s in the six-second fixture; at most two candidates |
+
+The standalone pixel detector also gates compression noise, half-screen transitions,
+full-screen flashes and localization to the visual-change centroid. These gates
+are synthetic **regressions**, not estimates of real-world edit precision.
+
+CI archives `visual-ui-original-synthetic.mp4` and
+`visual-ui-assisted-synthetic.mp4` alongside `cursor-benchmark.log`
+under the artifact `cineo-imported-video-synthetic-quality`. Review the pair
+before interpreting a technical PASS as a high-quality camera effect.
+
+On a Mac with only Command Line Tools:
+
+```sh
+CINEO_VISUAL_SAVE_SYNTHETIC=1 CINEO_CURSOR_SAVE_SYNTHETIC=1 \
+swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-cursor-benchmark
+```
+
 ## Commands on the Mac
 
 ```sh
