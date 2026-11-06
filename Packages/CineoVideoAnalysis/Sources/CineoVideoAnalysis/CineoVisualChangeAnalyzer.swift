@@ -87,12 +87,16 @@ public struct CineoVisualChangeDetector: Sendable {
             return true
         }
         guard success else { return nil }
-        return (0..<(width * height)).map { i in
+        var gray = [UInt8](repeating: 0, count: width * height)
+        for i in gray.indices {
             let offset = i * 4
-            return UInt8(min(255, (77 * Int(rgba[offset]) +
-                                   150 * Int(rgba[offset + 1]) +
-                                    29 * Int(rgba[offset + 2])) >> 8))
+            let red = Int(rgba[offset])
+            let green = Int(rgba[offset + 1])
+            let blue = Int(rgba[offset + 2])
+            let weighted = 77 * red + 150 * green + 29 * blue
+            gray[i] = UInt8(min(255, weighted >> 8))
         }
+        return gray
     }
 }
 
