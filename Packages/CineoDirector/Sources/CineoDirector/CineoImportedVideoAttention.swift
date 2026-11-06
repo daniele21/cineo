@@ -55,6 +55,35 @@ public struct CineoImportedPointerAnalysis: Codable, Equatable, Sendable {
         else { throw CineoImportedVideoError.invalidAnalysis }
     }
 
+    /// Combine independent traces without interpolating missing frames. Retains the
+    /// most confident sample at duplicate timestamps (e.g. the shared seed).
+    public func merging(_ other: CineoImportedPointerAnalysis) throws
+        -> CineoImportedPointerAnalysis {
+        guard abs(sourceDuration - other.sourceDuration) <= 0.2,
+              provenance == other.provenance else {
+            throw CineoImportedVideoError.invalidAnalysis
+        }
+        let ordered = (samples + other.samples).sorted {
+            if $0.sourceSeconds != $1.sourceSeconds {
+                return $0.sourceSeconds < $1.sourceSeconds
+            }
+            return $0.confidence > $1.confidence
+        }
+        var unique: [CineoImportedPointerSample] = []
+        for sample in ordered {
+            if let previous = unique.last,
+               abs(previous.sourceSeconds - sample.sourceSeconds) < 0.0001 {
+                if sample.confidence > previous.confidence {
+                    unique[unique.count - 1] = sample
+                }
+            } else {
+                unique.append(sample)
+            }
+        }
+        return try .init(sourceDuration: sourceDuration,
+                         seedSourceSeconds: seedSourceSeconds, samples: unique)
+    }
+
     /// Only reliable pixel-derived positions become movement; no fabricated clicks.
     public func movementEvents(minimumConfidence: Double = 0.65) -> [CineoPointerEvent] {
         guard minimumConfidence.isFinite, (0...1).contains(minimumConfidence) else { return [] }
