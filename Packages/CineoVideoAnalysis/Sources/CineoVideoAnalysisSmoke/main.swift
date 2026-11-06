@@ -52,10 +52,20 @@ struct ImportedVideoNativeSmoke {
             previous: baseline, current: uiFrame, sourceSeconds: 3),
               candidate.x > 0.5,
               candidate.confidence >= 0.78,
-              candidate.changedFraction >= 0.2
+              candidate.changedFraction >= 0.2,
+              abs(candidate.x - 47.0 / Double(width)) < 0.07,
+              abs(candidate.y - 17.0 / Double(height)) < 0.07
         else { throw SmokeError.unexpectedResult }
         let white = [UInt8](repeating: 255, count: width * height)
-        guard visualDetector.detect(previous: baseline, current: white,
+        var broadChange = baseline
+        for y in 0..<height {
+            for x in 0..<(width / 2) {
+                broadChange[y * width + x] = 255
+            }
+        }
+        guard visualDetector.detect(previous: baseline, current: broadChange,
+                                    sourceSeconds: 3.5) == nil,
+              visualDetector.detect(previous: baseline, current: white,
                                     sourceSeconds: 4) == nil,
               visualDetector.detect(previous: baseline, current: uiFrame,
                                     sourceSeconds: .nan) == nil
