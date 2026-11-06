@@ -131,10 +131,11 @@ public actor CineoVisualChangeAnalyzer {
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
         let detector = CineoVisualChangeDetector()
-        let step = 1 / samplesPerSecond
-        let lastTime = min(expectedSourceDuration - 0.05, 600)
-        let totalFrames = min(1_200, Int(lastTime / step))
-        guard totalFrames >= 2 else { return [] }
+        // Sample all of the source timeline, not just its first ten minutes.
+        // Long videos use a coarser interval to stay within the frame budget.
+        let lastTime = expectedSourceDuration - 0.05
+        let totalFrames = min(1_200, max(2, Int(lastTime * samplesPerSecond)))
+        let step = lastTime / Double(totalFrames - 1)
 
         var previous: [UInt8]?
         var changes: [CineoVisualChangeCandidate] = []
