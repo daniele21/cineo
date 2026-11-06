@@ -54,6 +54,8 @@ Approve / reject / adjust → existing native Core Image preview / H264 export
 
 ## Quality measures before approval
 
+The native smoke checks cache/visual changes without XCTest or the Swift Testing module, which standalone Apple Command Line Tools do not include. The synthetic H264 benchmark now tests visual-only pixel detection → CameraPlanner → exported MP4 and verifies the source hash. Real-video acceptance remains separate.
+
 Annotate at least 5 representative real videos (including cursorless and difficult-pointer recordings). Log candidate start/end, intended target, confidence, source evidence, acceptance decision and final render parity. Report coverage/recall of meaningful moments, precision of proposals, false zooms per minute, cursor drift and end-to-end analysis duration by clip length. Synthetic tests alone do **not** prove semantic relevance or good cinematic motion.
 
 ## Commands on the Mac
@@ -64,7 +66,8 @@ git switch integration/imported-video-assisted-20261106 \
   || git switch --track origin/integration/imported-video-assisted-20261106
 git pull --ff-only
 swift test --package-path Packages/CineoDirector
-swift test --package-path Packages/CineoVideoAnalysis
+swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-video-smoke
+swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-cursor-benchmark
 swift build --package-path Apps/Cineo --configuration release
 bash scripts/test-cineo.sh --interactive
 ```
