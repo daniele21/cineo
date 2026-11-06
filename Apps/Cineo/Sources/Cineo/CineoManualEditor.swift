@@ -2752,11 +2752,15 @@ struct CineoManualEditorView: View {
                                 .toggleStyle(.checkbox)
                                 if editor.autoEditEvidence.indices.contains(index) {
                                     let hint = editor.autoEditEvidence[index]
-                                    Text(String(format: "%.0f%%", hint.confidence * 100))
+                                    // This is a heuristic evidence score, not a
+                                    // calibrated probability that the shot is useful.
+                                    Text(hint.confidence >= 0.9 ? "Segnali forti" :
+                                         (hint.confidence >= 0.78 ? "Segnali medi" : "Da verificare"))
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
-                                        .help(hint.origin == .correlated ? "Sosta cursore + cambio UI" :
-                                              (hint.origin == .pointerDwell ? "Sosta cursore" : "Cambio UI"))
+                                        .help("Valutazione euristica, non percentuale di accuratezza. " +
+                                              (hint.origin == .correlated ? "Sosta cursore + cambio UI" :
+                                               (hint.origin == .pointerDwell ? "Sosta cursore" : "Cambio UI")))
                                 }
                                 Button("Vai") {
                                     editor.scrub(min(editor.duration - 0.05,
