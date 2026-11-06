@@ -32,6 +32,32 @@ struct ImportedVideoNativeSmoke {
         try store.save(report, projectURL: project)
         guard try store.load(projectURL: project) == report else { throw SmokeError.unexpectedResult }
 
+        // CLT-compatible pixel-difference regression: no Testing module
+        // is available under /Library/Developer/CommandLineTools.
+        let detector = CineoVisualChangeDetector()
+        let width = CineoVisualChangeDetector.width
+        let height = CineoVisualChangeDetector.height
+        let blank = [UInt8](repeating: 120, count: width * height)
+        let noise = [UInt8](repeating: 130, count: width * height)
+        guard detector.detect(previous: blank, current: blank,
+                              sourceSeconds: 1) == nil,
+              detector.detect(previous: blank, current: noise,
+                              sourceSeconds: 1) == nil
+        else { throw SmokeError.unexpectedResult }
+        var changed = blank
+        for y in 12..<22 {
+            for x in 40..<54 { changed[y * width + x] = 230 }
+        }
+        guard let cue = detector.detect(
+            previous: blank, current: changed, sourceSeconds: 3),
+              cue.x > 0.5, cue.confidence >= 0.78
+        else { throw SmokeError.unexpectedResult }
+        let white = [UInt8](repeating: 255, count: width * height)
+        guard detector.detect(previous: blank, current: white,
+                              sourceSeconds: 4) == nil
+        else { throw SmokeError.unexpectedResult }
+        print("PASS: native CLT visual-change, compression-noise and flash gates")
+
         let tracker = CineoVideoCursorTracker()
         do {
             _ = try await tracker.analyze(videoURL: video, expectedSourceDuration: 10,
