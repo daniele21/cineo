@@ -18,21 +18,22 @@ public struct CineoVisualChangeReport: Codable, Sendable {
     }
 
     public func validate() throws {
+        // Store each validation result separately: trailing-closure syntax
+        // inside a comma-separated guard is ambiguous for Swift 6.
+        let validChanges = changes.allSatisfy { cue in
+            cue.sourceSeconds.isFinite && cue.sourceSeconds >= 0 &&
+            cue.sourceSeconds < sourceDuration &&
+            cue.x.isFinite && (0...1).contains(cue.x) &&
+            cue.y.isFinite && (0...1).contains(cue.y) &&
+            cue.confidence.isFinite && (0...1).contains(cue.confidence) &&
+            cue.changedFraction.isFinite && (0...1).contains(cue.changedFraction)
+        }
+        let ordered = zip(changes, changes.dropFirst()).allSatisfy { pair in
+            pair.0.sourceSeconds < pair.1.sourceSeconds
+        }
         guard version == 1, provenance == "pixel-ui-difference",
               sourceDuration.isFinite && sourceDuration > 0,
-              changes.count <= 2_000,
-              changes.allSatisfy {
-                  $0.sourceSeconds.isFinite && $0.sourceSeconds >= 0 &&
-                  $0.sourceSeconds < sourceDuration &&
-                  $0.x.isFinite && (0...1).contains($0.x) &&
-                  $0.y.isFinite && (0...1).contains($0.y) &&
-                  $0.confidence.isFinite && (0...1).contains($0.confidence) &&
-                  $0.changedFraction.isFinite &&
-                  (0...1).contains($0.changedFraction)
-              },
-              zip(changes, changes.dropFirst()).allSatisfy {
-                  $0.0.sourceSeconds < $0.1.sourceSeconds
-              }
+              changes.count <= 2_000, validChanges, ordered
         else { throw CineoVisualAnalysisError.invalidVideo }
     }
 }
