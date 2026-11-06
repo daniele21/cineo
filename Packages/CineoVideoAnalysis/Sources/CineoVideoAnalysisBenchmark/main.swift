@@ -173,6 +173,20 @@ struct CineoImportedCursorBenchmark {
               SHA256.hash(data: try Data(contentsOf: visualVideo)) == visualDigest
         else { throw BenchmarkError.invalidExport }
         print("PASS: real synthetic H264 -> visual UI detection -> visual-only shots -> edited H264; original SHA unchanged")
+        if ProcessInfo.processInfo.environment["CINEO_VISUAL_SAVE_SYNTHETIC"] == "1" {
+            let outputDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            for (source, name) in [
+                (visualVideo, "visual-ui-original-synthetic.mp4"),
+                (visualExport, "visual-ui-assisted-synthetic.mp4")
+            ] {
+                let destination = outputDirectory.appendingPathComponent(name)
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    try FileManager.default.removeItem(at: destination)
+                }
+                try FileManager.default.copyItem(at: source, to: destination)
+            }
+            print("VISUAL_ARTIFACTS original=visual-ui-original-synthetic.mp4 edited=visual-ui-assisted-synthetic.mp4")
+        }
 
         // Negative control: static imported videos must not receive arbitrary
         // camera motion, even when transcoded to a real H.264 MP4.
