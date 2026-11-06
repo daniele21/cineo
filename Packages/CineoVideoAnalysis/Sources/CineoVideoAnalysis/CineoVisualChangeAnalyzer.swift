@@ -60,13 +60,39 @@ public struct CineoVisualChangeDetector: Sendable {
         let localFraction = Double(mostChanged.element) / Double(tileArea)
         guard localFraction >= 0.23 else { return nil }
 
+        // A scene-wide crossfade may change less than 65% of all pixels and
+        // still saturate most tiles. It is not a safe region of visual focus.
+        let activeTiles = changedPerTile.filter {
+            Double($0) / Double(tileArea) >= 0.25
+        }.count
+        guard activeTiles < (tilesX * tilesY) / 2 else { return nil }
+
         let tx = mostChanged.offset % tilesX
         let ty = mostChanged.offset / tilesX
+        // Focusing on the winning tile's center biases zooms toward a corner
+        // of a wide button/modal. Estimate the changed region centroid near
+        // the strongest tile instead. Far-away independent changes must not
+        // pull the target away from this localized region.
+        var sumX = 0.0
+        var sumY = 0.0
+        var localChangedCount = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = y * width + x
+                let changed = abs(Int(current[index]) - Int(previous[index])) >= 30
+                guard changed, abs(x / tileW - tx) <= 1,
+                      abs(y / tileH - ty) <= 1 else { continue }
+                sumX += Double(x) + 0.5
+                sumY += Double(y) + 0.5
+                localChangedCount += 1
+            }
+        }
+        guard localChangedCount > 0 else { return nil }
         let confidence = min(0.94, 0.58 + 0.45 * localFraction +
                              0.10 * min(1, globalFraction / 0.10))
         return .init(sourceSeconds: sourceSeconds,
-                     x: (Double(tx) + 0.5) / Double(tilesX),
-                     y: (Double(ty) + 0.5) / Double(tilesY),
+                     x: sumX / (Double(localChangedCount) * Double(width)),
+                     y: sumY / (Double(localChangedCount) * Double(height)),
                      confidence: confidence,
                      changedFraction: localFraction)
     }
