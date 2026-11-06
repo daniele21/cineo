@@ -74,6 +74,35 @@ struct CineoImportedVideoAttentionTests {
         #expect(p.keyframes.allSatisfy { $0.time < 8 })
     }
 
+    @Test func bidirectionalTracesMergeInSourceOrderWithoutInventedSamples() throws {
+        let before = try CineoImportedPointerAnalysis(
+            sourceDuration: 20, seedSourceSeconds: 8,
+            samples: [sample(6, 0.2, 0.2), sample(7, 0.4, 0.3),
+                      sample(8, 0.5, 0.5, 0.7)])
+        let after = try CineoImportedPointerAnalysis(
+            sourceDuration: 20, seedSourceSeconds: 8,
+            samples: [sample(8, 0.5, 0.5, 0.95), sample(9, 0.6, 0.4),
+                      sample(11, 0.7, 0.3)])
+        let merged = try before.merging(after)
+        #expect(merged.samples.map(\.sourceSeconds) == [6, 7, 8, 9, 11])
+        #expect(merged.samples[2].confidence == 0.95)
+        #expect(merged.movementEvents().count == 5)
+        #expect(merged.movementEvents().allSatisfy { $0.kind == .moved })
+        #expect(CineoImportedVideoAttentionPlanner().inferredDwells(analysis: merged).isEmpty)
+    }
+
+    @Test func rejectsMergeAcrossDifferentSourceDurations() throws {
+        let one = try CineoImportedPointerAnalysis(
+            sourceDuration: 10, seedSourceSeconds: 0,
+            samples: [sample(0, 0.5, 0.5)])
+        let other = try CineoImportedPointerAnalysis(
+            sourceDuration: 20, seedSourceSeconds: 0,
+            samples: [sample(0, 0.5, 0.5)])
+        #expect(throws: CineoImportedVideoError.invalidAnalysis) {
+            try one.merging(other)
+        }
+    }
+
     @Test func JSONRoundTripPreservesProvenanceAndBounds() throws {
         let input = try CineoImportedPointerAnalysis(
             sourceDuration: 10, seedSourceSeconds: 1,
