@@ -1155,6 +1155,7 @@ final class CineoEditorModel: ObservableObject {
         guard sourceURL != nil, !isExporting else { return }
         let draft: CineoAutoEditProposal
         let origin: String
+        autoEditEvidence = []
         if hasPointerEvents, let pointerSidecar {
             let editSidecar: CineoPointerSidecar
             if let cutList {
@@ -1175,18 +1176,27 @@ final class CineoEditorModel: ObservableObject {
             draft = CineoAutoEditPlanner().propose(
                 sidecar: editSidecar, duration: duration, preset: autoEditPreset)
             origin = "click registrati"
-        } else if let analysis = importedAnalysis {
+        } else if importedAnalysis != nil || !visualCues.isEmpty {
             let cuts = cutList
             let mapper: @Sendable (Double) -> Double? = { seconds in
                 if let cuts { return cuts.outputTime(forSourceSeconds: seconds) }
                 return seconds
             }
-            draft = CineoImportedVideoAttentionPlanner().propose(
-                analysis: analysis, outputDuration: duration,
-                cutMapper: mapper, preset: autoEditPreset)
-            origin = "soste stimate del cursore (nessun click dedotto)"
+            let visual = visualCues.map {
+                CineoVisualAttentionCue(sourceSeconds: $0.sourceSeconds,
+                                        x: $0.x, y: $0.y,
+                                        confidence: $0.confidence,
+                                        changedFraction: $0.changedFraction)
+            }
+            let assisted = CineoImportedAssistedPlanner().propose(
+                pointerAnalysis: importedAnalysis, visualCues: visual,
+                outputDuration: duration, cutMapper: mapper,
+                preset: autoEditPreset)
+            draft = assisted.proposal
+            autoEditEvidence = assisted.evidence
+            origin = "soste del cursore e cambiamenti UI (nessun click ricostruito)"
         } else {
-            status = "Per un MP4 esterno seleziona «Analizza cursore nel video». Per una registrazione Cineo abilita i click."
+            status = "Per un MP4 esterno scegli «Analizza video». Il tracking cursore è facoltativo."
             return
         }
         autoEditShots = draft.shots
@@ -1227,6 +1237,7 @@ final class CineoEditorModel: ObservableObject {
         autoEditShots = []
         autoEditSelectedIndices = []
         autoEditShotCount = 0
+        autoEditEvidence = []
         refreshPreview()
     }
 
@@ -1260,6 +1271,7 @@ final class CineoEditorModel: ObservableObject {
         autoEditShots = []
         autoEditSelectedIndices = []
         autoEditShotCount = 0
+        autoEditEvidence = []
         importedActionMarkers = []
         status = "Smart Camera applicata: \(count) sequenze; ogni keyframe resta modificabile."
         refreshPreview()
@@ -1269,6 +1281,7 @@ final class CineoEditorModel: ObservableObject {
         pointerSidecar = nil
         cursorOverlay = nil
         importedAnalysis = nil
+        visualCues = []
         if let project {
             pointerSidecar = try? CineoPointerSidecarStore().load(projectURL: project)
         } else {
@@ -1283,6 +1296,13 @@ final class CineoEditorModel: ObservableObject {
             : try? cache.load(projectURL: project!)
         if let cached, abs(cached.sourceDuration - sourceDuration) < 0.2 {
             importedAnalysis = cached
+        }
+        let visualStore = CineoVisualChangeStore()
+        let cachedVisual = project == nil
+            ? try? visualStore.load(forVideo: source)
+            : try? visualStore.load(projectURL: project!)
+        if let cachedVisual, abs(cachedVisual.sourceDuration - sourceDuration) < 0.2 {
+            visualCues = cachedVisual.changes
         }
         hasPointerMovement = (pointerSidecar?.events.contains(where: { $0.kind == .moved }) ?? false)
             || hasImportedVideoMotion
@@ -1305,13 +1325,16 @@ final class CineoEditorModel: ObservableObject {
         autoEditShots = []
         autoEditSelectedIndices = []
         autoEditShotCount = 0
+        autoEditEvidence = []
         autoEditPreviewEnabled = false
     }
 
     func open(_ url: URL) async {
         guard !isExporting && !isSavingProject else { return }
         cancelImportedVideoAnalysis()
+        cancelVisualAnalysis()
         importedAnalysis = nil
+        visualCues = []
         status = "Caricamento del video o progetto…"
         pausePreviewPlayback()
         // Music jobs are owned by the application queue; no cancellation on navigation.
@@ -1497,6 +1520,15 @@ final class CineoEditorModel: ObservableObject {
                         importedCacheWarning = " · Analisi cursore non archiviata: \(error.localizedDescription)"
                     }
                 }
+                if !visualCues.isEmpty {
+                    do {
+                        let report = try CineoVisualChangeReport(
+                            sourceDuration: length, changes: visualCues)
+                        try CineoVisualChangeStore().save(report, projectURL: location)
+                    } catch {
+                        importedCacheWarning += " · Analisi visiva non archiviata: \(error.localizedDescription)"
+                    }
+                }
                 musicQueue.relinkVideo(from: source, to: savedSource)
                 projectURL = location
                 sourceURL = savedSource
@@ -1609,7 +1641,9 @@ final class CineoEditorModel: ObservableObject {
             return
         }
         cancelImportedVideoAnalysis()
+        cancelVisualAnalysis()
         importedAnalysis = nil
+        visualCues = []
         hasPointerMovement = false
         pausePreviewPlayback()
         // Music jobs are owned by the application queue; no cancellation on navigation.
