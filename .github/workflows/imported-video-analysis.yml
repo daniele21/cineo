@@ -28,6 +28,8 @@ jobs:
           swift --version
       - name: Compile pixel-analysis and Vision tracking
         run: swift build --package-path Packages/CineoVideoAnalysis --configuration release
+      - name: Test visual-change gating with deterministic synthetic frames
+        run: swift test --package-path Packages/CineoVideoAnalysis
       - name: Verify local cache persistence, fingerprint invalidation and safe seed
         run: swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-video-smoke
       - name: Gate synthetic H264 cursor precision and coverage
