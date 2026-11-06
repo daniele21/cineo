@@ -1,0 +1,65 @@
+name: Imported video Vision tracker — CLT macOS
+on:
+  pull_request:
+    paths:
+      - 'Packages/CineoVideoAnalysis/**'
+      - 'Packages/CineoDirector/**'
+      - 'Apps/Cineo/**'
+      - '.github/workflows/imported-video-analysis.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vision-package:
+    name: SwiftPM native Vision tracking (no Xcode)
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Library/Developer/CommandLineTools
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check standalone Apple CLI toolchain
+        run: |
+          set -euo pipefail
+          test "$(xcode-select -p)" = /Library/Developer/CommandLineTools
+          xcrun --sdk macosx --show-sdk-path
+          swift --version
+      - name: Compile pixel-analysis and Vision tracking
+        run: swift build --package-path Packages/CineoVideoAnalysis --configuration release
+      # Swift Testing is unavailable with Apple's standalone Command Line Tools.
+      # Smoke checks execute without XCTest, Xcode.app or any UI permissions.
+      - name: Verify visual-change gating, cache and safe seed (CLT only)
+        run: swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-video-smoke
+      - name: Gate synthetic H264 cursor precision and coverage
+        env:
+          CINEO_CURSOR_TRACE: "1"
+          CINEO_CURSOR_SAVE_SYNTHETIC: "1"
+          CINEO_VISUAL_SAVE_SYNTHETIC: "1"
+        run: |
+          set -euo pipefail
+          swift run --package-path Packages/CineoVideoAnalysis --configuration release cineo-import-cursor-benchmark | tee cursor-benchmark.log
+      - name: Archive synthetic cursor quality output
+        uses: actions/upload-artifact@v4
+        with:
+          name: cineo-imported-video-synthetic-quality
+          path: |
+            cursor-benchmark.log
+            cursor-synthetic-debug.mp4
+            visual-ui-original-synthetic.mp4
+            visual-ui-assisted-synthetic.mp4
+          retention-days: 7
+      - name: Compile complete native Cineo Studio
+        run: swift build --package-path Apps/Cineo --configuration release
+
+  deterministic-attention:
+    name: Strict provenance and safe inferred dwells
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.2
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test output-clock mapping and inferred dwell behavior
+        run: swift test --package-path Packages/CineoDirector --filter CineoImportedVideoAttentionTests

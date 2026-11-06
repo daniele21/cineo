@@ -1,0 +1,315 @@
+import Foundation
+import AVFoundation
+import CoreVideo
+import CryptoKit
+import CineoVideoAnalysis
+import CineoDirector
+import CineoScene
+
+/// Exploratory synthetic quality measurement. Non-gating until evaluated
+/// against a diverse set of real, user-consented screen recordings.
+@main
+struct CineoImportedCursorBenchmark {
+    static func main() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cineo-cursor-benchmark-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let video = root.appendingPathComponent("synthetic-screen.mp4")
+        try await generateVideo(video)
+        if ProcessInfo.processInfo.environment["CINEO_CURSOR_SAVE_SYNTHETIC"] == "1" {
+            let artifact = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent("cursor-synthetic-debug.mp4")
+            if FileManager.default.fileExists(atPath: artifact.path) {
+                try FileManager.default.removeItem(at: artifact)
+            }
+            try FileManager.default.copyItem(at: video, to: artifact)
+            print("CURSOR_SYNTHETIC_TEST_MEDIA bytes=\((try Data(contentsOf: video)).count)")
+        }
+        let digestBefore = SHA256.hash(data: try Data(contentsOf: video))
+        let asset = AVURLAsset(url: video)
+        let duration = try await asset.load(.duration)
+        let sourceSeconds = duration.seconds
+        let sourceX = (85.0 + 2.7 * 2) / 640.0
+        let sourceY = 120.0 / 360.0
+        let report: CineoImportedPointerAnalysis?
+        do {
+            report = try await CineoVideoCursorTracker().analyze(
+                videoURL: video, expectedSourceDuration: sourceSeconds,
+                seedSourceSeconds: 0.05, hotspotX: sourceX, hotspotY: sourceY,
+                samplesPerSecond: 6)
+        } catch {
+            report = nil
+            print("QUALITY TRACKING INCONCLUSIVE: \(error)")
+        }
+        let digestAfter = SHA256.hash(data: try Data(contentsOf: video))
+        guard digestBefore == digestAfter else {
+            throw BenchmarkError.sourceModified
+        }
+        if let report {
+            let known = report.samples.map { point -> Double in
+                let frame = min(59, max(0, Int((point.sourceSeconds * 30).rounded())))
+                let expectedX = 85.0 + 2.7 * Double(frame)
+                let expectedY = 120.0
+                return hypot(point.x * 640 - expectedX,
+                             point.y * 360 - expectedY)
+            }
+            for sample in report.samples.prefix(14) {
+                let frame = min(59, max(0, Int((sample.sourceSeconds * 30).rounded())))
+                let expectedX = 85.0 + 2.7 * Double(frame)
+                print(String(format: "CURSOR_POINT time=%.2f x=%.1f y=%.1f refX=%.1f refY=120.0 confidence=%.2f",
+                             sample.sourceSeconds, sample.x * 640, sample.y * 360,
+                             expectedX, sample.confidence))
+            }
+            let avg = known.reduce(0, +) / Double(known.count)
+            let highQuality = report.samples.filter { $0.confidence >= 0.65 }.count
+            let lastTracked = report.samples.last?.sourceSeconds ?? 0
+            let coverage = Double(known.count) / 12.0
+            print(String(format: "CURSOR_BENCHMARK samples=%d confident=%d meanErrorPx=%.2f maxErrorPx=%.2f coverage=%.2f lastTracked=%.2f",
+                         known.count, highQuality, avg, known.max() ?? 0, coverage, lastTracked))
+            guard known.count >= 11, highQuality >= 11,
+                  lastTracked >= sourceSeconds - 0.2,
+                  avg <= 8, (known.max() ?? .infinity) <= 16 else {
+                throw BenchmarkError.qualityFailed
+            }
+        } else {
+            print("CURSOR_BENCHMARK samples=0 confident=0 result=lost-track")
+            throw BenchmarkError.qualityFailed
+        }
+        // Full local pipeline: inferred dwell -> editable camera keyframes ->
+        // actual Core Image H264 output. This uses explicitly simulated
+        // position observations so tracking correctness and edit correctness
+        // are tested independently instead of conflating failures.
+        let stable = (1...10).map { index in
+            CineoImportedPointerSample(
+                sourceSeconds: Double(index) * 0.1,
+                x: 0.68, y: 0.36, confidence: 0.95)
+        }
+        let inferred = try CineoImportedPointerAnalysis(
+            sourceDuration: sourceSeconds, seedSourceSeconds: 0.1,
+            samples: stable)
+        let suggestion = CineoImportedVideoAttentionPlanner().propose(
+            analysis: inferred, outputDuration: sourceSeconds,
+            cutMapper: { $0 }, preset: .balanced)
+        guard suggestion.shots.count == 1,
+              suggestion.keyframes.count == 4
+        else { throw BenchmarkError.noAttentionShot }
+        let rendered = root.appendingPathComponent("imported-smartcamera.mp4")
+        let scene = CineoScenePlan(outputWidth: 320, outputHeight: 180,
+                                   paddingFraction: 0.08,
+                                   camera: suggestion.keyframes)
+        try scene.validate()
+        try await CineoSceneExporter().export(
+            source: video, destination: rendered, plan: scene)
+        let assetOut = AVURLAsset(url: rendered)
+        guard let outTrack = try await assetOut.loadTracks(withMediaType: .video).first
+        else { throw BenchmarkError.invalidExport }
+        let outDuration = try await assetOut.load(.duration)
+        let outSize = try await outTrack.load(.naturalSize)
+        guard abs(outDuration.seconds - sourceSeconds) < 0.35,
+              outSize.width == 320, outSize.height == 180,
+              SHA256.hash(data: try Data(contentsOf: video)) == digestBefore
+        else { throw BenchmarkError.invalidExport }
+        print("PASS: inferred dwell -> editable Smart Camera keyframes -> real H264 320x180")
+        print("PASS: synthetic H264 cursor accuracy and original source SHA unchanged")
+
+        // An independent, cursorless acceptance path: synthesize an MP4 UI
+        // change; decode pixels through AVFoundation; fuse visual evidence;
+        // render editable camera keyframes and preserve the original bytes.
+        let visualVideo = root.appendingPathComponent("synthetic-visual-ui.mp4")
+        try await generateVideo(visualVideo, frames: 120, uiChangeFrame: 45,
+                                includeCursor: false)
+        let visualDigest = SHA256.hash(data: try Data(contentsOf: visualVideo))
+        let visualAsset = AVURLAsset(url: visualVideo)
+        let visualDuration = try await visualAsset.load(.duration)
+        let pixels = try await CineoVisualChangeAnalyzer().analyze(
+            videoURL: visualVideo,
+            expectedSourceDuration: visualDuration.seconds,
+            samplesPerSecond: 2)
+        print("VISUAL_BENCHMARK cues=\(pixels.count) uiRegions=\(pixels.filter { $0.x > 0.5 }.count)")
+        guard pixels.contains(where: {
+            $0.x > 0.5 && $0.sourceSeconds >= 1.4 &&
+            $0.sourceSeconds <= 2.2 && $0.confidence >= 0.78
+        }) else { throw BenchmarkError.noVisualCue }
+        let fusion = CineoImportedAssistedPlanner().propose(
+            pointerAnalysis: nil,
+            visualCues: pixels.map {
+                CineoVisualAttentionCue(
+                    sourceSeconds: $0.sourceSeconds, x: $0.x, y: $0.y,
+                    confidence: $0.confidence, changedFraction: $0.changedFraction)
+            },
+            outputDuration: visualDuration.seconds, cutMapper: { $0 })
+        let visualEvidencePresent = fusion.evidence.contains { item in
+            item.origin == .visualChange
+        }
+        let onlyDwellReason = fusion.proposal.shots.allSatisfy { shot in
+            shot.reason == .dwell
+        }
+        guard !fusion.proposal.shots.isEmpty,
+              fusion.proposal.shots.count == fusion.evidence.count,
+              visualEvidencePresent, onlyDwellReason
+        else { throw BenchmarkError.noVisualShot }
+        // Fixture target: center of the button rectangle, in 640x360 pixels.
+        let expectedFocusX = 411.0 / 640.0
+        let expectedFocusY = 225.5 / 360.0
+        let observedShot = fusion.proposal.shots[0]
+        let focusError = hypot(
+            (observedShot.focusX - expectedFocusX) * 640,
+            (observedShot.focusY - expectedFocusY) * 360)
+        print(String(format:
+            "VISUAL_QUALITY targetErrorPx=%.2f confidence=%.3f time=%.2f",
+            focusError, fusion.evidence[0].confidence, pixels[0].sourceSeconds))
+        guard focusError <= 45 else { throw BenchmarkError.qualityFailed }
+        let visualScene = CineoScenePlan(
+            outputWidth: 320, outputHeight: 180,
+            paddingFraction: 0.08, camera: fusion.proposal.keyframes)
+        try visualScene.validate()
+        let visualExport = root.appendingPathComponent("visual-assisted-export.mp4")
+        try await CineoSceneExporter().export(
+            source: visualVideo, destination: visualExport, plan: visualScene)
+        let visualOut = AVURLAsset(url: visualExport)
+        let exportedDuration = try await visualOut.load(.duration)
+        guard abs(exportedDuration.seconds - visualDuration.seconds) < 0.35,
+              SHA256.hash(data: try Data(contentsOf: visualVideo)) == visualDigest
+        else { throw BenchmarkError.invalidExport }
+        print("PASS: real synthetic H264 -> visual UI detection -> visual-only shots -> edited H264; original SHA unchanged")
+        if ProcessInfo.processInfo.environment["CINEO_VISUAL_SAVE_SYNTHETIC"] == "1" {
+            let outputDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            for (source, name) in [
+                (visualVideo, "visual-ui-original-synthetic.mp4"),
+                (visualExport, "visual-ui-assisted-synthetic.mp4")
+            ] {
+                let destination = outputDirectory.appendingPathComponent(name)
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    try FileManager.default.removeItem(at: destination)
+                }
+                try FileManager.default.copyItem(at: source, to: destination)
+            }
+            print("VISUAL_ARTIFACTS original=visual-ui-original-synthetic.mp4 edited=visual-ui-assisted-synthetic.mp4")
+        }
+
+        // Negative control: static imported videos must not receive arbitrary
+        // camera motion, even when transcoded to a real H.264 MP4.
+        let staticVideo = root.appendingPathComponent("synthetic-static-ui.mp4")
+        try await generateVideo(staticVideo, frames: 120, includeCursor: false)
+        let staticAsset = AVURLAsset(url: staticVideo)
+        let staticDuration = try await staticAsset.load(.duration)
+        let staticCues = try await CineoVisualChangeAnalyzer().analyze(
+            videoURL: staticVideo, expectedSourceDuration: staticDuration.seconds,
+            samplesPerSecond: 2)
+        let staticResult = CineoImportedAssistedPlanner().propose(
+            pointerAnalysis: nil,
+            visualCues: staticCues.map {
+                CineoVisualAttentionCue(
+                    sourceSeconds: $0.sourceSeconds, x: $0.x, y: $0.y,
+                    confidence: $0.confidence, changedFraction: $0.changedFraction)
+            },
+            outputDuration: staticDuration.seconds, cutMapper: { $0 })
+        guard staticCues.isEmpty && staticResult.proposal.shots.isEmpty
+        else { throw BenchmarkError.falsePositive }
+        print("VISUAL_QUALITY negativeControl=static cueCount=0 zoomCount=0")
+
+        // Late change: global analysis must not be restricted to the selected
+        // frame or the first part of an imported MP4.
+        let lateVideo = root.appendingPathComponent("synthetic-late-ui.mp4")
+        try await generateVideo(lateVideo, frames: 180, uiChangeFrame: 135,
+                                includeCursor: false)
+        let lateAsset = AVURLAsset(url: lateVideo)
+        let lateDuration = try await lateAsset.load(.duration)
+        let lateCues = try await CineoVisualChangeAnalyzer().analyze(
+            videoURL: lateVideo, expectedSourceDuration: lateDuration.seconds,
+            samplesPerSecond: 2)
+        guard lateCues.contains(where: { $0.sourceSeconds >= 4.3 }),
+              lateCues.count <= 2
+        else { throw BenchmarkError.noVisualCue }
+        print("VISUAL_QUALITY lateEventDetected=true cueCount=\(lateCues.count)")
+    }
+
+    enum BenchmarkError: Error {
+        case writerFailed, sourceModified, qualityFailed, noAttentionShot,
+             noVisualCue, noVisualShot, falsePositive, invalidExport
+    }
+
+    static func generateVideo(_ url: URL, frames: Int = 60,
+                              uiChangeFrame: Int? = nil,
+                              includeCursor: Bool = true) async throws {
+        let width = 640, height = 360
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height,
+            AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: 1_000_000]
+        ])
+        input.expectsMediaDataInRealTime = false
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: width,
+                kCVPixelBufferHeightKey as String: height,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
+            ])
+        writer.add(input)
+        guard writer.startWriting() else { throw BenchmarkError.writerFailed }
+        writer.startSession(atSourceTime: .zero)
+        for frame in 0..<frames {
+            guard let pool = adaptor.pixelBufferPool else { throw BenchmarkError.writerFailed }
+            var result: CVPixelBuffer?
+            guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &result) == kCVReturnSuccess,
+                  let pixel = result else { throw BenchmarkError.writerFailed }
+            paint(pixel, width: width, height: height,
+                  cursorX: 85 + Int(2.7 * Double(frame)), cursorY: 120,
+                  uiChanged: uiChangeFrame.map { frame >= $0 } ?? false,
+                  includeCursor: includeCursor)
+            while !input.isReadyForMoreMediaData {
+                try await Task.sleep(for: .milliseconds(4))
+            }
+            guard adaptor.append(pixel, withPresentationTime: CMTime(value: Int64(frame), timescale: 30))
+            else { throw BenchmarkError.writerFailed }
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        guard writer.status == .completed else { throw BenchmarkError.writerFailed }
+    }
+
+    static func paint(_ pixel: CVPixelBuffer, width: Int, height: Int,
+                      cursorX: Int, cursorY: Int, uiChanged: Bool = false,
+                      includeCursor: Bool = true) {
+        CVPixelBufferLockBaseAddress(pixel, [])
+        defer { CVPixelBufferUnlockBaseAddress(pixel, []) }
+        guard let pointer = CVPixelBufferGetBaseAddress(pixel) else { return }
+        let address = pointer.assumingMemoryBound(to: UInt8.self)
+        let stride = CVPixelBufferGetBytesPerRow(pixel)
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = y * stride + x * 4
+                let navBar = y < 48
+                let panel = x > 50 && x < 575 && y > 73 && y < 310
+                let button = x > 330 && x < 492 && y > 200 && y < 251
+                let channel: UInt8 = navBar ? 40 :
+                    (button ? (uiChanged ? 34 : 126) : (panel ? 232 : 250))
+                address[index] = channel
+                address[index + 1] = navBar ? 55 : channel
+                address[index + 2] = navBar ? 70 : channel
+                address[index + 3] = 255
+            }
+        }
+        guard includeCursor else { return }
+        // High-contrast macOS-like arrow: black border, white inside.
+        // The annotated hotspot is the upper-left tip at cursorX/cursorY.
+        for dy in 0..<22 {
+            for dx in 0...min(12, dy * 2 / 3) {
+                let x = cursorX + dx, y = cursorY + dy
+                guard x >= 0, x < width, y >= 0, y < height else { continue }
+                let edge = dx == 0 || dx == min(12, dy * 2 / 3) || dy == 21
+                let color: UInt8 = edge ? 12 : 255
+                let index = y * stride + x * 4
+                address[index] = color
+                address[index + 1] = color
+                address[index + 2] = color
+                address[index + 3] = 255
+            }
+        }
+    }
+}

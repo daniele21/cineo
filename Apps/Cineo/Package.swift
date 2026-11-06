@@ -11,7 +11,8 @@ let package = Package(
         .package(path: "../../Packages/CineoMusic"),
         .package(path: "../../Packages/CineoAudio"),
         .package(path: "../../Packages/CineoEvents"),
-        .package(path: "../../Packages/CineoDirector")
+        .package(path: "../../Packages/CineoDirector"),
+        .package(path: "../../Packages/CineoVideoAnalysis")
     ],
     targets: [
         .executableTarget(name: "Cineo", dependencies: [
@@ -20,7 +21,8 @@ let package = Package(
             .product(name: "CineoMusic", package: "CineoMusic"),
             .product(name: "CineoAudio", package: "CineoAudio"),
             .product(name: "CineoEvents", package: "CineoEvents"),
-            .product(name: "CineoDirector", package: "CineoDirector")
+            .product(name: "CineoDirector", package: "CineoDirector"),
+            .product(name: "CineoVideoAnalysis", package: "CineoVideoAnalysis")
         ])
     ]
 )

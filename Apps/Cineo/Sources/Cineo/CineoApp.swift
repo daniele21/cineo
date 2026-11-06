@@ -127,10 +127,17 @@ struct CaptureLogEntry: Identifiable {
     }
 }
 
+@MainActor
+private final class CineoCaptureDashboardLayoutState: ObservableObject {
+    @Published var recordingOptionsExpanded = true
+}
+
 private struct CaptureDashboard: View {
     @ObservedObject var recorder: CineoScreenRecorder
     @ObservedObject var editor: CineoEditorModel
     let onEditVideo: (URL) -> Void
+
+    @StateObject private var layout = CineoCaptureDashboardLayoutState()
 
     private var buildRevision: String {
         Bundle.main.object(forInfoDictionaryKey: "CineoSourceCommit") as? String ?? "unknown"
@@ -148,200 +155,243 @@ private struct CaptureDashboard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                CineoBrandSymbol(size: 54)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Cineo")
-                        .font(CineoBrand.displayFont(size: 29))
-                        .foregroundStyle(.primary) // Auto-adapts brand headline for macOS Dark Mode
-                    Text("Il focus su ciò che conta.")
-                        .font(CineoBrand.bodyFont(size: 13))
-                        .foregroundStyle(CineoBrand.muted)
-                        .foregroundStyle(.secondary)
-                    Text("Capture fix candidate • stream-stop finalization")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("SOURCE \(buildRevision) • PID \(ProcessInfo.processInfo.processIdentifier)")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
+        GeometryReader { geometry in
+            let compact = geometry.size.width < 850
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    if compact {
+                        VStack(alignment: .leading, spacing: 16) {
+                            captureActions
+                            captureOptions
+                        }
+                    } else {
+                        HStack(alignment: .top, spacing: 16) {
+                            captureActions.frame(maxWidth: .infinity, alignment: .leading)
+                            captureOptions.frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    recordingStatus
+                    activityLog
+                    Text("Tutto rimane sul tuo Mac · Dev \(buildRevision) · PID \(ProcessInfo.processInfo.processIdentifier)")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
                         .textSelection(.enabled)
                 }
+                .frame(maxWidth: 1080, alignment: .leading)
+                .padding(22)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            Divider()
-            HStack {
-                Text("Lavori musicali in background")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                CineoMusicQueueButton(editor: editor)
+        }
+        .frame(minWidth: 620, minHeight: 490)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 12) {
+            CineoBrandSymbol(size: 40)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Cineo")
+                    .font(CineoBrand.displayFont(size: 25))
+                Text("Registra lo schermo. Cura il montaggio.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
-            Text("Registra lo schermo su questo Mac (H.264 MP4)")
+            Spacer(minLength: 10)
+            CineoMusicQueueButton(editor: editor)
+        }
+    }
+
+    private var captureActions: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Label("Crea un video", systemImage: "record.circle")
                 .font(.headline)
-            HStack(spacing: 16) {
-                Toggle("Audio sistema", isOn: $recorder.captureSystemAudio)
-                Toggle("Microfono", isOn: $recorder.captureMicrophone)
-                Toggle("Registra click (Auto Edit)", isOn: $recorder.captureClickEvents)
-                Toggle("Movimento cursore", isOn: $recorder.capturePointerMovement)
-                Toggle("Cursore ricostruito (beta)", isOn: $recorder.captureIndependentCursor)
-                    .help("Nasconde il cursore nella registrazione e lo ricrea nel compositor. Richiede telemetria e test su Mac.")
-            }
-            .toggleStyle(.checkbox)
-            .disabled(recorder.phase == .recording || recorder.phase.isWorking)
-            Text("Opzioni disattivate per default. Cursore ricostruito nasconde il puntatore nel video originale e salva movimento/tempi in un sidecar locale; mai testo o tasti. Usa questa modalità solo dopo un test Mac.")
-                .font(.caption2).foregroundStyle(.secondary)
-            HStack(spacing: 12) {
-                if recorder.phase == .recording {
-                    Button {
-                        Task { await recorder.stop() }
-                    } label: {
-                        Label("Stop recording", systemImage: "stop.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                } else {
-                    Button {
-                        Task { await recorder.start() }
-                    } label: {
-                        Label("Record main display", systemImage: "record.circle")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(recorder.phase.isWorking)
-                }
+            Text("Registra il display principale oppure apri un MP4 per modificarlo.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if recorder.phase == .recording {
                 Button {
-                    recorder.openRecordingsFolder()
+                    Task { await recorder.stop() }
                 } label: {
-                    Label("Show recordings", systemImage: "folder")
+                    Label("Termina registrazione", systemImage: "stop.fill")
                 }
-                if let url = recorder.lastCompletedVideo, recorder.phase == .complete {
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .controlSize(.large)
+            } else {
+                Button {
+                    Task { await recorder.start() }
+                } label: {
+                    Label("Registra lo schermo", systemImage: "record.circle")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(recorder.phase.isWorking)
+            }
+            Button {
+                let panel = NSOpenPanel()
+                // Project packages are directories; existing editor code
+                // validates the chosen file/project before opening it.
+                panel.canChooseDirectories = true
+                panel.allowsMultipleSelection = false
+                panel.allowedContentTypes = []
+                if panel.runModal() == .OK, let url = panel.url {
+                    onEditVideo(url)
+                }
+            } label: {
+                Label("Apri MP4 o progetto…", systemImage: "film")
+            }
+            if let url = recorder.lastCompletedVideo, recorder.phase == .complete {
+                HStack(spacing: 10) {
+                    Button {
+                        onEditVideo(url)
+                    } label: {
+                        Label("Modifica ultima registrazione", systemImage: "slider.horizontal.3")
+                    }
+                    .help(url.lastPathComponent)
                     Button {
                         recorder.openLastRecording()
                     } label: {
-                        Label("Open MP4", systemImage: "play.rectangle")
+                        Image(systemName: "play.rectangle")
                     }
-                    .help(url.lastPathComponent)
-                }
-                if let url = recorder.lastCompletedVideo, recorder.phase == .complete {
-                    Button {
-                        onEditVideo(url)
-                    } label: {
-                        Label("Apri editor", systemImage: "slider.horizontal.3")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .help("Modifica inquadratura, zoom e sfondi; il video originale resta invariato.")
-                }
-                Button {
-                    let panel = NSOpenPanel()
-                    // .cineo is a package directory; make it selectable as well
-                    // as MP4 files. The editor validates file and project contents.
-                    panel.canChooseDirectories = true
-                    panel.allowsMultipleSelection = false
-                    panel.allowedContentTypes = []
-                    if panel.runModal() == .OK, let url = panel.url {
-                        onEditVideo(url)
-                    }
-                } label: {
-                    Label("Apri MP4 / progetto…", systemImage: "film")
+                    .help("Apri l'ultimo MP4")
                 }
             }
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    if recorder.phase == .recording {
-                        Image(systemName: "record.circle.fill")
-                            .foregroundStyle(.red)
-                            .symbolEffect(.pulse)
-                    } else if recorder.phase.isWorking {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: recorder.phase == .complete ? "checkmark.circle.fill" :
-                              recorder.phase == .failed ? "exclamationmark.triangle.fill" : "info.circle")
-                            .foregroundStyle(recorder.phase == .failed ? .orange : .secondary)
-                    }
-                    Text(recorder.phase.name)
-                        .font(.headline)
-                    Spacer()
-                    Text(timeText)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-                Text(recorder.status)
-                    .font(.callout)
-                    .textSelection(.enabled)
-
-                HStack(spacing: 20) {
-                    Label("Captured: \(timeText)", systemImage: "clock")
-                    Label("File: \(fileSizeText)", systemImage: "doc")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                if recorder.phase == .finalizing || recorder.phase == .verifying {
-                    Text("Finalization: \(recorder.finalizationElapsedSeconds) s elapsed • waiting for system confirmation. No reliable percentage is available.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if recorder.finalizationElapsedSeconds >= 15 {
-                        Text("This is taking longer than usual. The source file is not deleted. Check the activity log for errors.")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                }
-                if let file = recorder.currentFilename {
-                    Text(file)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                }
+            Button {
+                recorder.openRecordingsFolder()
+            } label: {
+                Label("Cartella registrazioni", systemImage: "folder")
             }
-            .padding(14)
-            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("Activity log (\(recorder.logs.count))", systemImage: "list.bullet.rectangle")
-                        .font(.callout.weight(.medium))
-                    Spacer()
-                    Button("Copy diagnostics") {
-                        recorder.copyDiagnostics()
-                    }
-                    .font(.caption)
-                }
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(recorder.logs) { entry in
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Text(entry.date, style: .time)
-                                        .monospacedDigit()
-                                        .foregroundStyle(.secondary)
-                                    Image(systemName: entry.level == .error ? "exclamationmark.circle" :
-                                          entry.level == .warning ? "exclamationmark.triangle" : "checkmark.circle")
-                                        .foregroundStyle(entry.level == .error ? .red : .secondary)
-                                    Text(entry.message)
-                                        .textSelection(.enabled)
-                                }
-                                .font(.caption)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .id(entry.id)
-                            }
-                        }
-                    }
-                    .frame(height: 135)
-                    .onChange(of: recorder.logs.count) { _, _ in
-                        if let last = recorder.logs.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                    }
-                }
-            }
-            Text("Apri Studio per rivedere il video e creare proposte di Smart Camera dai click registrati. Tutto rimane in locale.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            .font(.caption)
         }
-        .frame(width: 620)
-        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var captureOptions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            DisclosureGroup("Opzioni di registrazione", isExpanded: $layout.recordingOptionsExpanded) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 175), alignment: .leading)],
+                          alignment: .leading, spacing: 10) {
+                    Toggle("Audio sistema", isOn: $recorder.captureSystemAudio)
+                    Toggle("Microfono", isOn: $recorder.captureMicrophone)
+                    Toggle("Registra click", isOn: $recorder.captureClickEvents)
+                        .help("Registra i click per Smart Camera e Auto Edit")
+                    Toggle("Movimento cursore", isOn: $recorder.capturePointerMovement)
+                    Toggle("Cursore ricostruito (beta)", isOn: $recorder.captureIndependentCursor)
+                        .help("Nasconde il puntatore nel video originale e lo ricrea in postproduzione")
+                }
+                .toggleStyle(.checkbox)
+                .disabled(recorder.phase == .recording || recorder.phase.isWorking)
+                .padding(.top, 10)
+                Text("Le opzioni sono disattivate per default. La ricostruzione del cursore è sperimentale e richiede telemetria locale.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.headline)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var recordingStatus: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                if recorder.phase == .recording {
+                    Image(systemName: "record.circle.fill")
+                        .foregroundStyle(.red)
+                        .symbolEffect(.pulse)
+                } else if recorder.phase.isWorking {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: recorder.phase == .complete ? "checkmark.circle.fill" :
+                          recorder.phase == .failed ? "exclamationmark.triangle.fill" : "info.circle")
+                        .foregroundStyle(recorder.phase == .failed ? .orange : .secondary)
+                }
+                Text(recorder.phase.name)
+                    .font(.headline)
+                Spacer()
+                Text(timeText)
+                    .font(.headline.monospacedDigit())
+            }
+            Text(recorder.status)
+                .font(.callout)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 16) {
+                Label("Durata \(timeText)", systemImage: "clock")
+                Label(fileSizeText, systemImage: "doc")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            if recorder.phase == .finalizing || recorder.phase == .verifying {
+                Text("Finalizzazione: \(recorder.finalizationElapsedSeconds) s · in attesa della verifica del sistema, senza percentuale stimabile.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if recorder.finalizationElapsedSeconds >= 15 {
+                    Text("L'operazione sta richiedendo più tempo del previsto. Il video originale non è stato eliminato; controlla i log per eventuali errori.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            if let file = recorder.currentFilename {
+                Text(file)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var activityLog: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Registro attività · \(recorder.logs.count)", systemImage: "list.bullet.rectangle")
+                    .font(.headline)
+                Spacer()
+                Button("Copia diagnostica") { recorder.copyDiagnostics() }
+                    .font(.caption)
+            }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(recorder.logs) { entry in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(entry.date, style: .time)
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                                Image(systemName: entry.level == .error ? "exclamationmark.circle" :
+                                      entry.level == .warning ? "exclamationmark.triangle" : "checkmark.circle")
+                                    .foregroundStyle(entry.level == .error ? .red : .secondary)
+                                Text(entry.message)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .font(.caption)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id(entry.id)
+                        }
+                    }
+                }
+                .frame(height: 158)
+                .onChange(of: recorder.logs.count) { _, _ in
+                    if let last = recorder.logs.last {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(.quaternary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
