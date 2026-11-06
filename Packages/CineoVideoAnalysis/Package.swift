@@ -17,6 +17,7 @@ let package = Package(
             .product(name: "CineoDirector", package: "CineoDirector")]),
         .executableTarget(name: "CineoVideoAnalysisBenchmark", dependencies: ["CineoVideoAnalysis",
             .product(name: "CineoDirector", package: "CineoDirector"),
-            .product(name: "CineoScene", package: "CineoScene")])
+            .product(name: "CineoScene", package: "CineoScene")]),
+        .testTarget(name: "CineoVideoAnalysisTests", dependencies: ["CineoVideoAnalysis"])
     ]
 )
