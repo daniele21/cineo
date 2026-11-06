@@ -149,6 +149,17 @@ struct CineoImportedCursorBenchmark {
               fusion.proposal.shots.count == fusion.evidence.count,
               visualEvidencePresent, onlyDwellReason
         else { throw BenchmarkError.noVisualShot }
+        // Fixture target: center of the button rectangle, in 640x360 pixels.
+        let expectedFocusX = 411.0 / 640.0
+        let expectedFocusY = 225.5 / 360.0
+        let observedShot = fusion.proposal.shots[0]
+        let focusError = hypot(
+            (observedShot.focusX - expectedFocusX) * 640,
+            (observedShot.focusY - expectedFocusY) * 360)
+        print(String(format:
+            "VISUAL_QUALITY targetErrorPx=%.2f confidence=%.3f time=%.2f",
+            focusError, fusion.evidence[0].confidence, pixels[0].sourceSeconds))
+        guard focusError <= 45 else { throw BenchmarkError.qualityFailed }
         let visualScene = CineoScenePlan(
             outputWidth: 320, outputHeight: 180,
             paddingFraction: 0.08, camera: fusion.proposal.keyframes)
@@ -162,11 +173,47 @@ struct CineoImportedCursorBenchmark {
               SHA256.hash(data: try Data(contentsOf: visualVideo)) == visualDigest
         else { throw BenchmarkError.invalidExport }
         print("PASS: real synthetic H264 -> visual UI detection -> visual-only shots -> edited H264; original SHA unchanged")
+
+        // Negative control: static imported videos must not receive arbitrary
+        // camera motion, even when transcoded to a real H.264 MP4.
+        let staticVideo = root.appendingPathComponent("synthetic-static-ui.mp4")
+        try await generateVideo(staticVideo, frames: 120, includeCursor: false)
+        let staticAsset = AVURLAsset(url: staticVideo)
+        let staticDuration = try await staticAsset.load(.duration)
+        let staticCues = try await CineoVisualChangeAnalyzer().analyze(
+            videoURL: staticVideo, expectedSourceDuration: staticDuration.seconds,
+            samplesPerSecond: 2)
+        let staticResult = CineoImportedAssistedPlanner().propose(
+            pointerAnalysis: nil,
+            visualCues: staticCues.map {
+                CineoVisualAttentionCue(
+                    sourceSeconds: $0.sourceSeconds, x: $0.x, y: $0.y,
+                    confidence: $0.confidence, changedFraction: $0.changedFraction)
+            },
+            outputDuration: staticDuration.seconds, cutMapper: { $0 })
+        guard staticCues.isEmpty && staticResult.proposal.shots.isEmpty
+        else { throw BenchmarkError.falsePositive }
+        print("VISUAL_QUALITY negativeControl=static cueCount=0 zoomCount=0")
+
+        // Late change: global analysis must not be restricted to the selected
+        // frame or the first part of an imported MP4.
+        let lateVideo = root.appendingPathComponent("synthetic-late-ui.mp4")
+        try await generateVideo(lateVideo, frames: 180, uiChangeFrame: 135,
+                                includeCursor: false)
+        let lateAsset = AVURLAsset(url: lateVideo)
+        let lateDuration = try await lateAsset.load(.duration)
+        let lateCues = try await CineoVisualChangeAnalyzer().analyze(
+            videoURL: lateVideo, expectedSourceDuration: lateDuration.seconds,
+            samplesPerSecond: 2)
+        guard lateCues.contains(where: { $0.sourceSeconds >= 4.3 }),
+              lateCues.count <= 2
+        else { throw BenchmarkError.noVisualCue }
+        print("VISUAL_QUALITY lateEventDetected=true cueCount=\(lateCues.count)")
     }
 
     enum BenchmarkError: Error {
         case writerFailed, sourceModified, qualityFailed, noAttentionShot,
-             noVisualCue, noVisualShot, invalidExport
+             noVisualCue, noVisualShot, falsePositive, invalidExport
     }
 
     static func generateVideo(_ url: URL, frames: Int = 60,
