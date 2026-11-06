@@ -14,17 +14,78 @@ public enum CineoVideoTrackingError: Error, Equatable, Sendable {
 /// The user explicitly identifies the cursor in an existing frame; automatic
 /// cursor detection and click inference are NOT performed at this stage.
 /// Neither video pixels nor window contents leave the local process.
+public enum CineoVideoTrackingDirection: Sendable {
+    case forward
+    case backward
+
+    var sign: Double { self == .forward ? 1 : -1 }
+}
+
 public actor CineoVideoCursorTracker {
     public init() {}
 
-    /// Scan forward from a manually selected cursor hotspot.
+    /// Recover positions both before and after the user-selected seed. Neither
+    /// pass interpolates across tracking loss. The second direction is best-effort:
+    /// a missing pointer before the seed must not erase a valid forward analysis.
+    public func analyzeBidirectional(
+        videoURL: URL, expectedSourceDuration: Double,
+        seedSourceSeconds: Double, hotspotX: Double, hotspotY: Double,
+        samplesPerSecond: Double = 6,
+        progress: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> CineoImportedPointerAnalysis {
+        var earlier: CineoImportedPointerAnalysis?
+        if seedSourceSeconds > 0.2 {
+            do {
+                earlier = try await analyze(
+                    videoURL: videoURL,
+                    expectedSourceDuration: expectedSourceDuration,
+                    seedSourceSeconds: seedSourceSeconds,
+                    hotspotX: hotspotX, hotspotY: hotspotY,
+                    direction: .backward, samplesPerSecond: samplesPerSecond,
+                    progress: { value in progress?(value * 0.5) })
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // Missing/occluded cursor before the seed: keep only trusted data.
+            }
+        }
+        try Task.checkCancellation()
+        progress?(0.5)
+        var later: CineoImportedPointerAnalysis?
+        if seedSourceSeconds < expectedSourceDuration - 0.2 {
+            do {
+                later = try await analyze(
+                    videoURL: videoURL,
+                    expectedSourceDuration: expectedSourceDuration,
+                    seedSourceSeconds: seedSourceSeconds,
+                    hotspotX: hotspotX, hotspotY: hotspotY,
+                    direction: .forward, samplesPerSecond: samplesPerSecond,
+                    progress: { value in progress?(0.5 + value * 0.5) })
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // The valid reverse trace can still produce non-fabricated dwells.
+            }
+        }
+        try Task.checkCancellation()
+        progress?(1)
+        switch (earlier, later) {
+        case let (.some(before), .some(after)): return try before.merging(after)
+        case let (.some(before), .none): return before
+        case let (.none, .some(after)): return after
+        default: throw CineoVideoTrackingError.insufficientTracking
+        }
+    }
+
+    /// Scan from a manually selected cursor hotspot in the requested direction.
     /// Every emitted position is in SOURCE clock (not cut/output clock).
-    /// - Note: Long videos are bounded to a 10-minute scan per seed. At most
+    /// - Note: Long videos are bounded to a 10-minute scan per direction. At most
     ///   6,000 frames are decoded. No cursor pixels are removed or re-drawn.
     public func analyze(videoURL: URL,
                         expectedSourceDuration: Double,
                         seedSourceSeconds: Double,
                         hotspotX: Double, hotspotY: Double,
+                        direction: CineoVideoTrackingDirection = .forward,
                         samplesPerSecond: Double = 6,
                         progress: (@Sendable (Double) -> Void)? = nil) async throws
                         -> CineoImportedPointerAnalysis {
@@ -32,7 +93,9 @@ public actor CineoVideoCursorTracker {
               FileManager.default.isReadableFile(atPath: videoURL.path),
               expectedSourceDuration.isFinite && expectedSourceDuration > 0,
               seedSourceSeconds.isFinite && seedSourceSeconds >= 0 &&
-                  seedSourceSeconds < expectedSourceDuration - 0.15,
+                  seedSourceSeconds < expectedSourceDuration,
+              (direction == .forward ? seedSourceSeconds < expectedSourceDuration - 0.15 :
+               seedSourceSeconds > 0.15),
               hotspotX.isFinite && hotspotY.isFinite,
               (0...1).contains(hotspotX), (0...1).contains(hotspotY),
               samplesPerSecond.isFinite &&
@@ -87,9 +150,11 @@ public actor CineoVideoCursorTracker {
             tracker.inputObservation = seeded
         }
 
-        let lastTime = min(expectedSourceDuration - 0.05,
-                           seedSourceSeconds + min(600, 6_000 / samplesPerSecond))
-        guard lastTime > seedSourceSeconds else {
+        let scanSeconds = min(600, 6_000 / samplesPerSecond)
+        let lastTime = direction == .forward
+            ? min(expectedSourceDuration - 0.05, seedSourceSeconds + scanSeconds)
+            : max(0.05, seedSourceSeconds - scanSeconds)
+        guard abs(lastTime - seedSourceSeconds) > 0.05 else {
             throw CineoVideoTrackingError.invalidSelection
         }
         var samples: [CineoImportedPointerSample] = [
@@ -100,9 +165,10 @@ public actor CineoVideoCursorTracker {
         // cursor coordinates and confidence; never logs video pixels.
         let trace = ProcessInfo.processInfo.environment["CINEO_CURSOR_TRACE"] == "1"
         let step = 1 / samplesPerSecond
-        var nextTime = seedSourceSeconds + step
+        var nextTime = seedSourceSeconds + direction.sign * step
         var previousTime = seedSourceSeconds
-        while nextTime < lastTime && samples.count < 6_000 {
+        while (direction == .forward ? nextTime < lastTime : nextTime > lastTime) &&
+              samples.count < 6_000 {
             try Task.checkCancellation()
             var actualTime = CMTime.invalid
             let image: CGImage
@@ -114,7 +180,7 @@ public actor CineoVideoCursorTracker {
                 if trace { print(String(format: "CURSOR_TRACE decode-failed time=%.3f", nextTime)) }
                 failures += 1
                 if failures >= 4 { break }
-                nextTime += step
+                nextTime += direction.sign * step
                 continue
             }
             try Task.checkCancellation()
@@ -153,9 +219,12 @@ public actor CineoVideoCursorTracker {
                 continue
             }
             let stamped = CMTimeGetSeconds(actualTime)
-            let t = stamped.isFinite && stamped > previousTime ? stamped : nextTime
+            let correctDirection = stamped.isFinite &&
+                (stamped - previousTime) * direction.sign > 0
+            let t = correctDirection ? stamped : nextTime
             if confidence >= 0.45, (0...1).contains(x), (0...1).contains(y),
-               t > previousTime && t < expectedSourceDuration {
+               (t - previousTime) * direction.sign > 0 &&
+               t >= 0 && t < expectedSourceDuration {
                 samples.append(.init(sourceSeconds: t, x: x, y: y,
                                      confidence: confidence))
                 previousTime = t
@@ -169,15 +238,16 @@ public actor CineoVideoCursorTracker {
             if let observation {
                 tracker.inputObservation = observation
             }
-            nextTime += step
-            progress?(min(1, (nextTime - seedSourceSeconds) /
-                          max(0.01, lastTime - seedSourceSeconds)))
+            nextTime += direction.sign * step
+            progress?(min(1, abs(nextTime - seedSourceSeconds) /
+                          max(0.01, abs(lastTime - seedSourceSeconds))))
         }
         try Task.checkCancellation()
         guard samples.count >= 3 else { throw CineoVideoTrackingError.insufficientTracking }
         progress?(1)
         return try CineoImportedPointerAnalysis(
             sourceDuration: expectedSourceDuration,
-            seedSourceSeconds: seedSourceSeconds, samples: samples)
+            seedSourceSeconds: seedSourceSeconds,
+            samples: samples.sorted { $0.sourceSeconds < $1.sourceSeconds })
     }
 }
