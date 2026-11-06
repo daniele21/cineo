@@ -112,11 +112,59 @@ struct CineoImportedCursorBenchmark {
         else { throw BenchmarkError.invalidExport }
         print("PASS: inferred dwell -> editable Smart Camera keyframes -> real H264 320x180")
         print("PASS: synthetic H264 cursor accuracy and original source SHA unchanged")
+
+        // An independent, cursorless acceptance path: synthesize an MP4 UI
+        // change; decode pixels through AVFoundation; fuse visual evidence;
+        // render editable camera keyframes and preserve the original bytes.
+        let visualVideo = root.appendingPathComponent("synthetic-visual-ui.mp4")
+        try await generateVideo(visualVideo, frames: 120, uiChangeFrame: 45)
+        let visualDigest = SHA256.hash(data: try Data(contentsOf: visualVideo))
+        let visualAsset = AVURLAsset(url: visualVideo)
+        let visualDuration = try await visualAsset.load(.duration)
+        let pixels = try await CineoVisualChangeAnalyzer().analyze(
+            videoURL: visualVideo,
+            expectedSourceDuration: visualDuration.seconds,
+            samplesPerSecond: 2)
+        print("VISUAL_BENCHMARK cues=\(pixels.count) uiRegions=\(pixels.filter { $0.x > 0.5 }.count)")
+        guard pixels.contains(where: {
+            $0.x > 0.5 && $0.sourceSeconds >= 1.4 &&
+            $0.sourceSeconds <= 2.2 && $0.confidence >= 0.78
+        }) else { throw BenchmarkError.noVisualCue }
+        let fusion = CineoImportedAssistedPlanner().propose(
+            pointerAnalysis: nil,
+            visualCues: pixels.map {
+                CineoVisualAttentionCue(
+                    sourceSeconds: $0.sourceSeconds, x: $0.x, y: $0.y,
+                    confidence: $0.confidence, changedFraction: $0.changedFraction)
+            },
+            outputDuration: visualDuration.seconds, cutMapper: { $0 })
+        guard !fusion.proposal.shots.isEmpty,
+              fusion.proposal.shots.count == fusion.evidence.count,
+              fusion.evidence.contains(where: { $0.origin == .visualChange }),
+              fusion.proposal.shots.allSatisfy { $0.reason == .dwell }
+        else { throw BenchmarkError.noVisualShot }
+        let visualScene = CineoScenePlan(
+            outputWidth: 320, outputHeight: 180,
+            paddingFraction: 0.08, camera: fusion.proposal.keyframes)
+        try visualScene.validate()
+        let visualExport = root.appendingPathComponent("visual-assisted-export.mp4")
+        try await CineoSceneExporter().export(
+            source: visualVideo, destination: visualExport, plan: visualScene)
+        let visualOut = AVURLAsset(url: visualExport)
+        let exportedDuration = try await visualOut.load(.duration)
+        guard abs(exportedDuration.seconds - visualDuration.seconds) < 0.35,
+              SHA256.hash(data: try Data(contentsOf: visualVideo)) == visualDigest
+        else { throw BenchmarkError.invalidExport }
+        print("PASS: real synthetic H264 -> visual UI detection -> visual-only shots -> edited H264; original SHA unchanged")
     }
 
-    enum BenchmarkError: Error { case writerFailed, sourceModified, qualityFailed, noAttentionShot, invalidExport }
+    enum BenchmarkError: Error {
+        case writerFailed, sourceModified, qualityFailed, noAttentionShot,
+             noVisualCue, noVisualShot, invalidExport
+    }
 
-    static func generateVideo(_ url: URL) async throws {
+    static func generateVideo(_ url: URL, frames: Int = 60,
+                              uiChangeFrame: Int? = nil) async throws {
         let width = 640, height = 360
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
@@ -137,13 +185,14 @@ struct CineoImportedCursorBenchmark {
         writer.add(input)
         guard writer.startWriting() else { throw BenchmarkError.writerFailed }
         writer.startSession(atSourceTime: .zero)
-        for frame in 0..<60 {
+        for frame in 0..<frames {
             guard let pool = adaptor.pixelBufferPool else { throw BenchmarkError.writerFailed }
             var result: CVPixelBuffer?
             guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &result) == kCVReturnSuccess,
                   let pixel = result else { throw BenchmarkError.writerFailed }
-            paint(pixel, width: width, height: height, cursorX: 85 + Int(2.7 * Double(frame)),
-                  cursorY: 120)
+            paint(pixel, width: width, height: height,
+                  cursorX: 85 + Int(2.7 * Double(frame)), cursorY: 120,
+                  uiChanged: uiChangeFrame.map { frame >= $0 } ?? false)
             while !input.isReadyForMoreMediaData {
                 try await Task.sleep(for: .milliseconds(4))
             }
@@ -156,7 +205,7 @@ struct CineoImportedCursorBenchmark {
     }
 
     static func paint(_ pixel: CVPixelBuffer, width: Int, height: Int,
-                      cursorX: Int, cursorY: Int) {
+                      cursorX: Int, cursorY: Int, uiChanged: Bool = false) {
         CVPixelBufferLockBaseAddress(pixel, [])
         defer { CVPixelBufferUnlockBaseAddress(pixel, []) }
         guard let pointer = CVPixelBufferGetBaseAddress(pixel) else { return }
@@ -168,7 +217,8 @@ struct CineoImportedCursorBenchmark {
                 let navBar = y < 48
                 let panel = x > 50 && x < 575 && y > 73 && y < 310
                 let button = x > 330 && x < 492 && y > 200 && y < 251
-                let channel: UInt8 = navBar ? 40 : (button ? 126 : (panel ? 232 : 250))
+                let channel: UInt8 = navBar ? 40 :
+                    (button ? (uiChanged ? 34 : 126) : (panel ? 232 : 250))
                 address[index] = channel
                 address[index + 1] = navBar ? 55 : channel
                 address[index + 2] = navBar ? 70 : channel
