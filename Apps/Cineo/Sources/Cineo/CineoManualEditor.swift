@@ -2720,9 +2720,10 @@ struct CineoManualEditorView: View {
                     editor.proposeAutoEdit()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled((!editor.hasPointerEvents && !editor.hasImportedVideoMotion) ||
-                          editor.isExporting || editor.isAnalyzingImportedVideo)
-                .help("Usa i click registrati o le soste del cursore lungo tutta la timeline")
+                .disabled((!editor.hasPointerEvents && !editor.hasImportedVideoMotion &&
+                            editor.visualCues.isEmpty) || editor.isExporting ||
+                          editor.isAnalyzingImportedVideo || editor.isAnalyzingVisualChanges)
+                .help("Combina soste del cursore e cambiamenti visivi lungo la timeline")
             } else {
                 Button("Suggerisci zoom in questo punto") {
                     editor.applySuggestedZoom()
@@ -2749,6 +2750,14 @@ struct CineoManualEditorView: View {
                                         .font(.caption)
                                 }
                                 .toggleStyle(.checkbox)
+                                if editor.autoEditEvidence.indices.contains(index) {
+                                    let hint = editor.autoEditEvidence[index]
+                                    Text(String(format: "%.0f%%", hint.confidence * 100))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .help(hint.origin == .correlated ? "Sosta cursore + cambio UI" :
+                                              (hint.origin == .pointerDwell ? "Sosta cursore" : "Cambio UI"))
+                                }
                                 Button("Vai") {
                                     editor.scrub(min(editor.duration - 0.05,
                                                       shot.start + min(0.35, (shot.end-shot.start) * 0.25)))
