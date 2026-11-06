@@ -28,7 +28,7 @@ final class CineoEditorModel: ObservableObject {
     @Published var title = ""
     @Published var sourcePixelWidth = 1512
     @Published var sourcePixelHeight = 982
-    @Published var mode: Mode = .manual
+    @Published var mode: Mode = .assisted
     @Published var duration: Double = 0
     @Published private(set) var sourceDuration: Double = 0
     @Published private(set) var cutList: CineoCutList?
@@ -168,6 +168,12 @@ final class CineoEditorModel: ObservableObject {
     var hasImportedVideoMotion: Bool {
         (importedAnalysis?.movementEvents().count ?? 0) >= 3
     }
+    @Published private(set) var visualCues: [CineoVisualChangeCandidate] = []
+    @Published private(set) var isAnalyzingVisualChanges = false
+    @Published private(set) var visualAnalysisProgress: Double = 0
+    @Published private(set) var autoEditEvidence: [CineoAssistedZoomEvidence] = []
+    private var visualAnalysisTask: Task<Void, Never>?
+    private var visualAnalysisRequest = UUID()
     private var cursorFollowUndo: (before: [CineoCameraKeyframe], after: [CineoCameraKeyframe])?
     var canUndoCursorFollow: Bool { cursorFollowUndo?.after == keyframes }
     @Published private(set) var autoEditShotCount = 0
@@ -922,9 +928,73 @@ final class CineoEditorModel: ObservableObject {
         refreshPreview()
     }
 
+    func cancelVisualAnalysis() {
+        visualAnalysisTask?.cancel()
+        visualAnalysisTask = nil
+        visualAnalysisRequest = UUID()
+        isAnalyzingVisualChanges = false
+        visualAnalysisProgress = 0
+    }
+
+    /// Analyze visible UI changes without cursor telemetry, retaining only
+    /// confidence-tagged coordinates; video pixels never leave the device.
+    func analyzeVisualChanges() {
+        guard let source = sourceURL, !isExporting, !isSavingProject,
+              !isAnalyzingImportedVideo, !isAnalyzingVisualChanges else { return }
+        visualAnalysisRequest = UUID()
+        let requestID = visualAnalysisRequest
+        visualAnalysisProgress = 0
+        isAnalyzingVisualChanges = true
+        status = "Analisi visiva del video in corso (locale)…"
+        let length = sourceDuration
+        let analyzer = CineoVisualChangeAnalyzer()
+        visualAnalysisTask = Task { [weak self] in
+            do {
+                let changes = try await analyzer.analyze(
+                    videoURL: source, expectedSourceDuration: length,
+                    progress: { [weak self] fraction in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.visualAnalysisRequest == requestID,
+                                  self.sourceURL == source else { return }
+                            self.visualAnalysisProgress = fraction
+                        }
+                    })
+                guard let self, !Task.isCancelled,
+                      self.visualAnalysisRequest == requestID,
+                      self.sourceURL == source else { return }
+                self.visualCues = changes
+                do {
+                    let report = try CineoVisualChangeReport(
+                        sourceDuration: length, changes: changes)
+                    if let project = self.projectURL {
+                        try CineoVisualChangeStore().save(report, projectURL: project)
+                    } else {
+                        try CineoVisualChangeStore().save(report, forVideo: source)
+                    }
+                    self.status = "Analisi completata: \(changes.count) cambiamenti visuali."
+                } catch {
+                    self.status = "Analisi riuscita ma cache non salvata: \(error.localizedDescription)"
+                }
+                if !self.autoEditPreviewEnabled && !self.hasPointerEvents && !changes.isEmpty {
+                    self.proposeAutoEdit()
+                }
+            } catch is CancellationError {
+                guard let self, self.visualAnalysisRequest == requestID else { return }
+                self.status = "Analisi visiva annullata; video originale invariato."
+            } catch {
+                guard let self, self.visualAnalysisRequest == requestID else { return }
+                self.status = "Analisi visiva non riuscita: \(error.localizedDescription)"
+            }
+            guard let self, self.visualAnalysisRequest == requestID else { return }
+            self.isAnalyzingVisualChanges = false
+            self.visualAnalysisTask = nil
+        }
+    }
+
     /// Explicit user seed, never inferred from a click in video pixels.
     func requestImportedCursorSelection() {
-        guard sourceURL != nil, !isExporting, !isAnalyzingImportedVideo else { return }
+        guard sourceURL != nil, !isExporting, !isAnalyzingImportedVideo,
+              !isAnalyzingVisualChanges else { return }
         isChoosingImportedCursor = true
         pausePreviewPlayback()
         status = "Seleziona la punta del cursore nel fotogramma. Cineo analizzerà il video localmente a partire da qui."
@@ -972,7 +1042,7 @@ final class CineoEditorModel: ObservableObject {
         let videoLength = sourceDuration
         importedVideoAnalysisTask = Task { [weak self] in
             do {
-                let report = try await tracker.analyze(
+                let report = try await tracker.analyzeBidirectional(
                     videoURL: source, expectedSourceDuration: videoLength,
                     seedSourceSeconds: atSource, hotspotX: sx, hotspotY: sy,
                     progress: { [weak self] fraction in
@@ -985,15 +1055,21 @@ final class CineoEditorModel: ObservableObject {
                 guard let self, !Task.isCancelled,
                       self.importedAnalysisRequest == requestID,
                       self.sourceURL == source else { return }
-                self.importedAnalysis = report
+                let combined: CineoImportedPointerAnalysis
+                if let prior = self.importedAnalysis {
+                    combined = (try? prior.merging(report)) ?? report
+                } else {
+                    combined = report
+                }
+                self.importedAnalysis = combined
                 self.hasPointerMovement = (self.pointerSidecar?.events.contains {
                     $0.kind == .moved
                 } ?? false) || self.hasImportedVideoMotion
                 do {
                     if let project = self.projectURL {
-                        try CineoImportedAnalysisStore().save(report, projectURL: project)
+                        try CineoImportedAnalysisStore().save(combined, projectURL: project)
                     } else {
-                        try CineoImportedAnalysisStore().save(report, forVideo: source)
+                        try CineoImportedAnalysisStore().save(combined, forVideo: source)
                     }
                     self.status = "Tracking locale: \(report.samples.count) posizioni salvate. Ora puoi generare zoom da soste del cursore o applicare Camera Follow."
                 } catch {
