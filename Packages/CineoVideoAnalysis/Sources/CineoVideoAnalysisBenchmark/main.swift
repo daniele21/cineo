@@ -117,7 +117,8 @@ struct CineoImportedCursorBenchmark {
         // change; decode pixels through AVFoundation; fuse visual evidence;
         // render editable camera keyframes and preserve the original bytes.
         let visualVideo = root.appendingPathComponent("synthetic-visual-ui.mp4")
-        try await generateVideo(visualVideo, frames: 120, uiChangeFrame: 45)
+        try await generateVideo(visualVideo, frames: 120, uiChangeFrame: 45,
+                                includeCursor: false)
         let visualDigest = SHA256.hash(data: try Data(contentsOf: visualVideo))
         let visualAsset = AVURLAsset(url: visualVideo)
         let visualDuration = try await visualAsset.load(.duration)
@@ -138,10 +139,15 @@ struct CineoImportedCursorBenchmark {
                     confidence: $0.confidence, changedFraction: $0.changedFraction)
             },
             outputDuration: visualDuration.seconds, cutMapper: { $0 })
+        let visualEvidencePresent = fusion.evidence.contains { item in
+            item.origin == .visualChange
+        }
+        let onlyDwellReason = fusion.proposal.shots.allSatisfy { shot in
+            shot.reason == .dwell
+        }
         guard !fusion.proposal.shots.isEmpty,
               fusion.proposal.shots.count == fusion.evidence.count,
-              fusion.evidence.contains(where: { $0.origin == .visualChange }),
-              fusion.proposal.shots.allSatisfy { $0.reason == .dwell }
+              visualEvidencePresent, onlyDwellReason
         else { throw BenchmarkError.noVisualShot }
         let visualScene = CineoScenePlan(
             outputWidth: 320, outputHeight: 180,
@@ -164,7 +170,8 @@ struct CineoImportedCursorBenchmark {
     }
 
     static func generateVideo(_ url: URL, frames: Int = 60,
-                              uiChangeFrame: Int? = nil) async throws {
+                              uiChangeFrame: Int? = nil,
+                              includeCursor: Bool = true) async throws {
         let width = 640, height = 360
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
@@ -192,7 +199,8 @@ struct CineoImportedCursorBenchmark {
                   let pixel = result else { throw BenchmarkError.writerFailed }
             paint(pixel, width: width, height: height,
                   cursorX: 85 + Int(2.7 * Double(frame)), cursorY: 120,
-                  uiChanged: uiChangeFrame.map { frame >= $0 } ?? false)
+                  uiChanged: uiChangeFrame.map { frame >= $0 } ?? false,
+                  includeCursor: includeCursor)
             while !input.isReadyForMoreMediaData {
                 try await Task.sleep(for: .milliseconds(4))
             }
@@ -205,7 +213,8 @@ struct CineoImportedCursorBenchmark {
     }
 
     static func paint(_ pixel: CVPixelBuffer, width: Int, height: Int,
-                      cursorX: Int, cursorY: Int, uiChanged: Bool = false) {
+                      cursorX: Int, cursorY: Int, uiChanged: Bool = false,
+                      includeCursor: Bool = true) {
         CVPixelBufferLockBaseAddress(pixel, [])
         defer { CVPixelBufferUnlockBaseAddress(pixel, []) }
         guard let pointer = CVPixelBufferGetBaseAddress(pixel) else { return }
@@ -225,6 +234,7 @@ struct CineoImportedCursorBenchmark {
                 address[index + 3] = 255
             }
         }
+        guard includeCursor else { return }
         // High-contrast macOS-like arrow: black border, white inside.
         // The annotated hotspot is the upper-left tip at cursorX/cursorY.
         for dy in 0..<22 {
