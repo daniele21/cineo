@@ -2364,27 +2364,8 @@ struct CineoManualEditorView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if !compact {
-                Picker("Modalità", selection: $editor.mode) {
-                    ForEach(CineoEditorModel.Mode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 174)
-            }
-
             CineoMusicQueueButton(editor: editor)
             Menu {
-                if compact {
-                    Picker("Modalità", selection: $editor.mode) {
-                        ForEach(CineoEditorModel.Mode.allCases, id: \.self) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    Divider()
-                }
                 if editor.projectURL == nil {
                     Button("Salva progetto Cineo…") { editor.saveAsProject() }
                         .disabled(editor.isSavingProject || editor.isExporting)
@@ -2666,17 +2647,37 @@ struct CineoManualEditorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if !editor.hasPointerEvents {
+                Button("Analizza video") { editor.analyzeVisualChanges() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(editor.sourceURL == nil || editor.isExporting ||
+                              editor.isAnalyzingVisualChanges || editor.isAnalyzingImportedVideo)
+                    .help("Cerca cambiamenti UI e propone zoom sul video")
                 Button(editor.isChoosingImportedCursor
                        ? "Seleziona nell'anteprima…"
-                       : "Analizza cursore nel video") {
+                       : "Aggiungi tracking cursore (facoltativo)") {
                     editor.requestImportedCursorSelection()
                 }
                 .disabled(editor.sourceURL == nil || editor.isExporting ||
-                          editor.isAnalyzingImportedVideo)
+                          editor.isAnalyzingImportedVideo || editor.isAnalyzingVisualChanges)
                 if editor.isChoosingImportedCursor {
                     Text("Metti in pausa su un frame nitido e clicca sulla punta del cursore.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                if editor.isAnalyzingVisualChanges {
+                    ProgressView(value: editor.visualAnalysisProgress)
+                        .accessibilityLabel("Analisi UI locale")
+                    HStack {
+                        Text("\(Int(editor.visualAnalysisProgress * 100))% · analisi locale")
+                            .font(.caption.monospacedDigit())
+                        Spacer()
+                        Button("Annulla") { editor.cancelVisualAnalysis() }
+                    }
+                }
+                if !editor.visualCues.isEmpty {
+                    Label("\(editor.visualCues.count) cambiamenti visivi rilevati",
+                          systemImage: "checkmark.circle")
+                        .font(.caption)
                 }
             }
             if editor.isAnalyzingImportedVideo {
