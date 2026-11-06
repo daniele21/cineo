@@ -215,7 +215,7 @@ public actor CineoVideoCursorTracker {
             } else {
                 failures += 1
                 if failures >= 4 { break }
-                nextTime += step
+                nextTime += direction.sign * step
                 continue
             }
             let stamped = CMTimeGetSeconds(actualTime)
